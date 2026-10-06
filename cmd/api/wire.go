@@ -22,6 +22,8 @@ import (
 	cartpublic "github.com/nikhea/malawi-e-commerce-store/internal/cart/public"
 	categories "github.com/nikhea/malawi-e-commerce-store/internal/categories"
 	categoriespublic "github.com/nikhea/malawi-e-commerce-store/internal/categories/public"
+	inventory "github.com/nikhea/malawi-e-commerce-store/internal/inventory"
+	inventorypublic "github.com/nikhea/malawi-e-commerce-store/internal/inventory/public"
 	media "github.com/nikhea/malawi-e-commerce-store/internal/media"
 	mediapublic "github.com/nikhea/malawi-e-commerce-store/internal/media/public"
 	mediaservice "github.com/nikhea/malawi-e-commerce-store/internal/media/service"
@@ -48,6 +50,7 @@ type app struct {
 	variantsSvc   variantspublic.Service
 	productsSvc   productspublic.Service
 	cartSvc       cartpublic.Service
+	inventorySvc  inventorypublic.Service
 	authSvc       authpublic.Service
 	mediaSvc      *mediaservice.Service
 	riverClient   *river.Client[pgx.Tx]
@@ -64,6 +67,7 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 	variantsSvc := variants.Wire(pool)
 	productsSvc := products.Wire(pool, categoriesSvc, variantsSvc)
 	cartSvc := cart.Wire(pool, productsSvc, usersSvc)
+	inventorySvc := inventory.Wire(pool)
 
 	uploader, err := pkgmedia.NewCloudinaryUploader(pkgmedia.CloudinaryConfig{
 		CloudName: cfg.CloudName,
@@ -116,6 +120,7 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 		variantsSvc:   variantsSvc,
 		productsSvc:   productsSvc,
 		cartSvc:       cartSvc,
+		inventorySvc:  inventorySvc,
 		authSvc:       authSvc,
 		mediaSvc:      mediaSvc,
 		riverClient:   riverClient,
@@ -173,6 +178,7 @@ func registerRoutes(r *gin.Engine, a *app) {
 	variants.RegisterRoutes(open, protected, a.variantsSvc)
 	products.RegisterRoutes(open, protected, a.productsSvc, a.mediaSvc)
 	cart.RegisterRoutes(protected, a.cartSvc)
+	inventory.RegisterRoutes(protected, a.inventorySvc)
 
 	// Generated API docs (docs/ is committed; refresh with
 	// `swag init -g cmd/api/main.go --parseInternal -o docs`).

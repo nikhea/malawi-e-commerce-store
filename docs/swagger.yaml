@@ -99,6 +99,14 @@ definitions:
     - email
     - password
     type: object
+  dto.OrderRefRequest:
+    properties:
+      order_ref:
+        example: order_123
+        type: string
+    required:
+    - order_ref
+    type: object
   dto.RegisterRequest:
     properties:
       email:
@@ -114,6 +122,35 @@ definitions:
     - email
     - password
     type: object
+  dto.ReserveLineRequest:
+    properties:
+      product_id:
+        type: string
+      qty:
+        example: 2
+        type: integer
+      variant_id:
+        type: string
+    required:
+    - product_id
+    - qty
+    type: object
+  dto.ReserveRequest:
+    properties:
+      lines:
+        items:
+          $ref: '#/definitions/dto.ReserveLineRequest'
+        type: array
+      order_ref:
+        example: order_123
+        type: string
+      ttl_seconds:
+        example: 900
+        type: integer
+    required:
+    - lines
+    - order_ref
+    type: object
   dto.SetQtyRequest:
     properties:
       qty:
@@ -128,6 +165,18 @@ definitions:
         example: admin
     required:
     - role
+    type: object
+  dto.SetStockRequest:
+    properties:
+      product_id:
+        type: string
+      qty:
+        example: 50
+        type: integer
+      variant_id:
+        type: string
+    required:
+    - product_id
     type: object
   dto.UpdateCategoryRequest:
     properties:
@@ -283,6 +332,22 @@ definitions:
     x-enum-varnames:
     - RoleAdmin
     - RoleCustomer
+  public.Stock:
+    properties:
+      available:
+        example: 47
+        type: integer
+      on_hand:
+        example: 50
+        type: integer
+      product_id:
+        type: string
+      reserved:
+        example: 3
+        type: integer
+      variant_id:
+        type: string
+    type: object
   public.TokenPair:
     properties:
       email:
@@ -540,6 +605,198 @@ paths:
       security:
       - BearerAuth: []
       summary: Upload a category image (admin)
+      tags:
+      - admin
+  /admin/inventory/confirm:
+    post:
+      consumes:
+      - application/json
+      description: 'Idempotent: confirming twice succeeds.'
+      parameters:
+      - description: Order
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.OrderRefRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Confirm an order's holds into sales (admin)
+      tags:
+      - admin
+  /admin/inventory/release:
+    post:
+      consumes:
+      - application/json
+      description: 'Idempotent: releasing twice succeeds.'
+      parameters:
+      - description: Order
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.OrderRefRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Release an order's holds (admin)
+      tags:
+      - admin
+  /admin/inventory/reserve:
+    post:
+      consumes:
+      - application/json
+      description: Holds lines atomically; short lines fail the whole order.
+      parameters:
+      - description: Reservation
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.ReserveRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Reserve stock for an order (admin)
+      tags:
+      - admin
+  /admin/inventory/stock:
+    get:
+      parameters:
+      - description: Product ID
+        in: query
+        name: product_id
+        required: true
+        type: string
+      - description: Variant ID
+        in: query
+        name: variant_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.Stock'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Read availability (admin)
+      tags:
+      - admin
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Stock
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.SetStockRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.Stock'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Set on-hand stock (admin)
       tags:
       - admin
   /admin/products:
