@@ -12,6 +12,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/nikhea/malawi-e-commerce-store/config"
 	"github.com/nikhea/malawi-e-commerce-store/db"
+	users "github.com/nikhea/malawi-e-commerce-store/internal/users"
+	"github.com/nikhea/malawi-e-commerce-store/internal/users/repository"
+	userservice "github.com/nikhea/malawi-e-commerce-store/internal/users/service"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/middleware"
 )
 
@@ -29,7 +32,8 @@ func main() {
 		log.Fatalf("connect database: %v", err)
 	}
 	defer pool.Close()
-	_ = pool // repositories land in Phase 2 (users module)
+
+	usersSvc := userservice.NewService(repository.NewPostgres(pool))
 
 	r := gin.New()
 	r.Use(gin.Recovery(), middleware.RequestID(), middleware.Logger())
@@ -39,6 +43,8 @@ func main() {
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
+
+	users.RegisterRoutes(r.Group("/api/v1"), usersSvc)
 
 	srv := &http.Server{Addr: cfg.Addr(), Handler: r}
 
