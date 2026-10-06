@@ -102,6 +102,12 @@ func (fakeUsers) GetCredentials(context.Context, string) (userspublic.Credential
 func (fakeUsers) SetRole(context.Context, string, userspublic.Role) (userspublic.User, error) {
 	return userspublic.User{}, nil
 }
+func (fakeUsers) SetEmailVerified(context.Context, string, bool) (userspublic.User, error) {
+	return userspublic.User{}, nil
+}
+func (fakeUsers) SetPasswordHash(context.Context, string, string) (userspublic.User, error) {
+	return userspublic.User{}, nil
+}
 
 func TestWishlist(t *testing.T) {
 	ctx := context.Background()

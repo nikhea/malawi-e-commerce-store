@@ -146,6 +146,17 @@ func (s *service) GetByID(ctx context.Context, userID, orderID string) (public.O
 	return s.view(ctx, o)
 }
 
+func (s *service) GetByRef(ctx context.Context, orderID string) (public.Order, error) {
+	if strings.TrimSpace(orderID) == "" {
+		return public.Order{}, apperr.Validation("order id is required")
+	}
+	o, err := s.repo.GetByID(ctx, orderID)
+	if err != nil {
+		return public.Order{}, err
+	}
+	return s.view(ctx, o)
+}
+
 func (s *service) ListMine(ctx context.Context, userID string) ([]public.Order, error) {
 	if strings.TrimSpace(userID) == "" {
 		return nil, apperr.Validation("user id is required")

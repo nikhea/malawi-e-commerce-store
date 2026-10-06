@@ -139,6 +139,32 @@ definitions:
     required:
     - order_ref
     type: object
+  dto.PasswordForgotRequest:
+    properties:
+      email:
+        example: shop@malawi.mw
+        type: string
+    required:
+    - email
+    type: object
+  dto.PasswordResetRequest:
+    properties:
+      new_password:
+        example: hunter2-new
+        type: string
+      token:
+        type: string
+    required:
+    - new_password
+    - token
+    type: object
+  dto.RefreshRequest:
+    properties:
+      refresh_token:
+        type: string
+    required:
+    - refresh_token
+    type: object
   dto.RegisterRequest:
     properties:
       email:
@@ -256,6 +282,18 @@ definitions:
         type: string
       price_cents:
         type: integer
+    type: object
+  dto.VerifyEmailRequest:
+    properties:
+      code:
+        example: "482914"
+        type: string
+      email:
+        example: shop@malawi.mw
+        type: string
+    required:
+    - code
+    - email
     type: object
   public.Cart:
     properties:
@@ -526,6 +564,11 @@ definitions:
       name:
         example: Aisha Banda
         type: string
+      refresh_expires_at:
+        type: string
+      refresh_token:
+        example: w8X2...
+        type: string
       role:
         example: customer
         type: string
@@ -543,6 +586,8 @@ definitions:
       email:
         example: shop@malawi.mw
         type: string
+      email_verified:
+        type: boolean
       id:
         example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
         type: string
@@ -1311,6 +1356,115 @@ paths:
       summary: Log in
       tags:
       - auth
+  /auth/logout:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Refresh token
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.RefreshRequest'
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+      summary: Revoke a refresh token
+      tags:
+      - auth
+  /auth/password/forgot:
+    post:
+      consumes:
+      - application/json
+      description: Always succeeds (unknown emails too — no enumeration).
+      parameters:
+      - description: Email
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.PasswordForgotRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Request a password reset email
+      tags:
+      - auth
+  /auth/password/reset:
+    post:
+      consumes:
+      - application/json
+      description: Consumes the token, sets the password, revokes sessions.
+      parameters:
+      - description: Token + new password
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.PasswordResetRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      summary: Reset password with token
+      tags:
+      - auth
+  /auth/refresh:
+    post:
+      consumes:
+      - application/json
+      description: Reusing a consumed token kills the whole session chain.
+      parameters:
+      - description: Refresh token
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.RefreshRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.TokenPair'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      summary: Rotate into a fresh token pair
+      tags:
+      - auth
   /auth/register:
     post:
       consumes:
@@ -1340,6 +1494,61 @@ paths:
           schema:
             $ref: '#/definitions/response.ErrorResponse'
       summary: Register a new account
+      tags:
+      - auth
+  /auth/verify-email:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Email + code
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.VerifyEmailRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      summary: Verify email with OTP code
+      tags:
+      - auth
+  /auth/verify-email/request:
+    post:
+      consumes:
+      - application/json
+      description: Always succeeds (unknown emails too — no enumeration).
+      parameters:
+      - description: Email
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.PasswordForgotRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Resend the verification OTP
       tags:
       - auth
   /cart:

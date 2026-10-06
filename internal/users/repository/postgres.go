@@ -22,11 +22,11 @@ func NewPostgres(pool *pgxpool.Pool) *Postgres {
 	return &Postgres{pool: pool}
 }
 
-const userColumns = `id, email, password_hash, name, role, created_at, updated_at`
+const userColumns = `id, email, password_hash, name, role, email_verified, created_at, updated_at`
 
 func scanUser(row pgx.Row) (model.User, error) {
 	var u model.User
-	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Name, &u.Role, &u.CreatedAt, &u.UpdatedAt)
+	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Name, &u.Role, &u.EmailVerified, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return model.User{}, apperr.NotFound("user not found")
 	}
@@ -67,4 +67,18 @@ func (r *Postgres) SetRole(ctx context.Context, id, role string) (model.User, er
 	const q = `UPDATE users SET role = $2, updated_at = now() WHERE id = $1
 	           RETURNING ` + userColumns
 	return scanUser(r.pool.QueryRow(ctx, q, id, role))
+}
+
+// SetEmailVerified flips the verification flag (auth's OTP/reset flows).
+func (r *Postgres) SetEmailVerified(ctx context.Context, id string, verified bool) (model.User, error) {
+	const q = `UPDATE users SET email_verified = $2, updated_at = now() WHERE id = $1
+	           RETURNING ` + userColumns
+	return scanUser(r.pool.QueryRow(ctx, q, id, verified))
+}
+
+// SetPasswordHash replaces the stored hash (auth's reset flow).
+func (r *Postgres) SetPasswordHash(ctx context.Context, id, hash string) (model.User, error) {
+	const q = `UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1
+	           RETURNING ` + userColumns
+	return scanUser(r.pool.QueryRow(ctx, q, id, hash))
 }

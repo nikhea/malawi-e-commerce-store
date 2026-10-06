@@ -65,6 +65,26 @@ func (f *fakeRepo) SetRole(_ context.Context, id, role string) (model.User, erro
 	return u, nil
 }
 
+func (f *fakeRepo) SetEmailVerified(_ context.Context, id string, verified bool) (model.User, error) {
+	u, ok := f.byID[id]
+	if !ok {
+		return model.User{}, apperr.NotFound("user not found")
+	}
+	u.EmailVerified = verified
+	f.byID[id] = u
+	return u, nil
+}
+
+func (f *fakeRepo) SetPasswordHash(_ context.Context, id, hash string) (model.User, error) {
+	u, ok := f.byID[id]
+	if !ok {
+		return model.User{}, apperr.NotFound("user not found")
+	}
+	u.PasswordHash = hash
+	f.byID[id] = u
+	return u, nil
+}
+
 func TestCreate(t *testing.T) {
 	tests := []struct {
 		name     string

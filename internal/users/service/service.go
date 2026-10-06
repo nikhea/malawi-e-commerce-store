@@ -19,6 +19,8 @@ type Repository interface {
 	GetByID(ctx context.Context, id string) (model.User, error)
 	GetByEmail(ctx context.Context, email string) (model.User, error)
 	SetRole(ctx context.Context, id, role string) (model.User, error)
+	SetEmailVerified(ctx context.Context, id string, verified bool) (model.User, error)
+	SetPasswordHash(ctx context.Context, id, hash string) (model.User, error)
 }
 
 type service struct {
@@ -39,6 +41,7 @@ func toPublic(u model.User) public.User {
 		Email:     u.Email,
 		Name:      u.Name,
 		Role:      public.Role(u.Role),
+		EmailVerified: u.EmailVerified,
 		CreatedAt: u.CreatedAt,
 	}
 }
@@ -119,6 +122,31 @@ func (s *service) SetRole(ctx context.Context, id string, role public.Role) (pub
 		return public.User{}, apperr.Validation("invalid role")
 	}
 	u, err := s.repo.SetRole(ctx, id, string(role))
+	if err != nil {
+		return public.User{}, err
+	}
+	return toPublic(u), nil
+}
+
+func (s *service) SetEmailVerified(ctx context.Context, id string, verified bool) (public.User, error) {
+	if strings.TrimSpace(id) == "" {
+		return public.User{}, apperr.Validation("id is required")
+	}
+	u, err := s.repo.SetEmailVerified(ctx, id, verified)
+	if err != nil {
+		return public.User{}, err
+	}
+	return toPublic(u), nil
+}
+
+func (s *service) SetPasswordHash(ctx context.Context, id, hash string) (public.User, error) {
+	if strings.TrimSpace(id) == "" {
+		return public.User{}, apperr.Validation("id is required")
+	}
+	if hash == "" {
+		return public.User{}, apperr.Validation("password hash is required")
+	}
+	u, err := s.repo.SetPasswordHash(ctx, id, hash)
 	if err != nil {
 		return public.User{}, err
 	}

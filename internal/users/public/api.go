@@ -20,11 +20,12 @@ const (
 // User is the cross-module view of an account. It never carries the
 // password hash — only Credentials does, and only to the auth module.
 type User struct {
-	ID        string    `json:"id" example:"3fa85f64-5717-4562-b3fc-2c963f66afa6"`
-	Email     string    `json:"email" example:"shop@malawi.mw"`
-	Name      string    `json:"name" example:"Aisha Banda"`
-	Role      Role      `json:"role" example:"customer"`
-	CreatedAt time.Time `json:"created_at"`
+	ID            string    `json:"id" example:"3fa85f64-5717-4562-b3fc-2c963f66afa6"`
+	Email         string    `json:"email" example:"shop@malawi.mw"`
+	Name          string    `json:"name" example:"Aisha Banda"`
+	Role          Role      `json:"role" example:"customer"`
+	EmailVerified bool      `json:"email_verified"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // CreateUserInput carries everything needed to register an account.
@@ -58,4 +59,8 @@ type Service interface {
 	// SetRole changes an account's access level. Admin-only: enforced by
 	// the RequireRole middleware on /admin routes, not by this package.
 	SetRole(ctx context.Context, id string, role Role) (User, error)
+	// SetEmailVerified flips the verification flag (auth's OTP flow).
+	SetEmailVerified(ctx context.Context, id string, verified bool) (User, error)
+	// SetPasswordHash replaces the stored hash (auth's reset flow).
+	SetPasswordHash(ctx context.Context, id, hash string) (User, error)
 }

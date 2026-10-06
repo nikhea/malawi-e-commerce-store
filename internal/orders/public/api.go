@@ -54,6 +54,9 @@ type Service interface {
 	Checkout(ctx context.Context, userID string) (Order, error)
 	// GetByID returns one order, owner-checked.
 	GetByID(ctx context.Context, userID, orderID string) (Order, error)
+	// GetByRef returns one order WITHOUT owner check. Trusted internal
+	// callers only (worker notifications) — never expose via HTTP.
+	GetByRef(ctx context.Context, orderID string) (Order, error)
 	// ListMine returns the caller's orders, newest first.
 	ListMine(ctx context.Context, userID string) ([]Order, error)
 	// Cancel releases stock and publishes OrderCancelled. Pending only.

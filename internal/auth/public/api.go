@@ -19,16 +19,43 @@ type Claims struct {
 	Expiry time.Time
 }
 
-// TokenPair is what register/login hand the client. Account fields are
-// flattened scalars (not nested module types) so generated API docs
-// resolve without cross-package ambiguity; clients get one flat object.
+// TokenPair is what register/login/refresh hand the client. Account
+// fields are flattened scalars (not nested module types) so generated
+// API docs resolve without cross-package ambiguity.
 type TokenPair struct {
-	Token     string    `json:"token" example:"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."`
-	ExpiresAt time.Time `json:"expires_at"`
-	UserID    string    `json:"user_id" example:"3fa85f64-5717-4562-b3fc-2c963f66afa6"`
-	Email     string    `json:"email" example:"shop@malawi.mw"`
-	Name      string    `json:"name" example:"Aisha Banda"`
-	Role      string    `json:"role" example:"customer"`
+	Token          string    `json:"token" example:"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."`
+	ExpiresAt      time.Time `json:"expires_at"`
+	RefreshToken   string    `json:"refresh_token" example:"w8X2..."`
+	RefreshExpires time.Time `json:"refresh_expires_at"`
+	UserID         string    `json:"user_id" example:"3fa85f64-5717-4562-b3fc-2c963f66afa6"`
+	Email          string    `json:"email" example:"shop@malawi.mw"`
+	Name           string    `json:"name" example:"Aisha Banda"`
+	Role           string    `json:"role" example:"customer"`
+}
+
+// Events emitted by this module. The worker sends the emails.
+const (
+	// EmailVerificationRequested payload: VerificationMail.
+	EmailVerificationRequested = "auth.email_verification_requested"
+	// PasswordResetRequested payload: ResetMail.
+	PasswordResetRequested = "auth.password_reset_requested"
+)
+
+// VerificationMail carries an OTP to the worker's mail sender. The code
+// travels in-process only — the DB keeps just its hash.
+type VerificationMail struct {
+	UserID string
+	Email  string
+	Name   string
+	Code   string
+}
+
+// ResetMail carries a reset token to the mail sender (same secrecy rule).
+type ResetMail struct {
+	UserID string
+	Email  string
+	Name   string
+	Token  string
 }
 
 // RegisterInput carries a signup. Password is RAW here — hashed inside
@@ -47,4 +74,21 @@ type Service interface {
 	// contract (not utils) so callers depend on auth's promise, and so
 	// the middleware can take this interface instead of the service.
 	Parse(token string) (Claims, error)
+	// RequestVerification (re)sends the OTP email. Idempotent: always
+	// succeeds for existing accounts (unknown emails also succeed —
+	// no enumeration).
+	RequestVerification(ctx context.Context, email string) error
+	// VerifyEmail checks the OTP and flips the verified flag.
+	VerifyEmail(ctx context.Context, email, code string) error
+	// RequestPasswordReset emails a reset link. Always succeeds (no
+	// enumeration); unknown emails just don't send.
+	RequestPasswordReset(ctx context.Context, email string) error
+	// ResetPassword consumes a reset token and sets the new password,
+	// revoking all refresh tokens (stolen-session lockout).
+	ResetPassword(ctx context.Context, token, newPassword string) error
+	// Refresh rotates a refresh token into a fresh pair. Reuse of a
+	// consumed token revokes the whole chain (theft detection).
+	Refresh(ctx context.Context, refreshToken string) (TokenPair, error)
+	// Logout revokes one refresh token. Unknown tokens succeed silently.
+	Logout(ctx context.Context, refreshToken string) error
 }

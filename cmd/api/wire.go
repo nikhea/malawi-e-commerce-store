@@ -45,6 +45,7 @@ import (
 	wishlist "github.com/nikhea/malawi-e-commerce-store/internal/wishlist"
 	wishlistpublic "github.com/nikhea/malawi-e-commerce-store/internal/wishlist/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/events"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/mail"
 	pkgmedia "github.com/nikhea/malawi-e-commerce-store/pkg/media"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/middleware"
 	"github.com/redis/go-redis/v9"
@@ -143,6 +144,11 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 	// The expiry worker runs here too (same idempotent job): the sweep
 	// works with api alone, worker alone, or both — whoever is up.
 	river.AddWorker(workers, jobs.NewExpireReservationsWorker(inventorySvc, ordersSvc))
+	// Mail worker registered (not just the worker binary): River REQUIRES
+	// the kind in the inserting client's bundle, so the API must know it
+	// too. Either process may deliver; River still runs each job once.
+	sender := mail.NewSMTPSender("smtp.gmail.com", 587, cfg.EmailAddress, cfg.EmailPassword, cfg.EmailAddress)
+	river.AddWorker(workers, jobs.NewSendMailWorker(sender))
 	// Completion callbacks: the worker calls these after a successful
 	// upload. New image owners add one RegisterComplete line here.
 	mediaSvc.RegisterComplete(mediapublic.OwnerCategory,
@@ -159,12 +165,17 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 		return nil, fmt.Errorf("river start: %w", err)
 	}
 
-	authSvc := auth.Wire(
-		usersSvc,
+	authSvc := auth.Wire(pool, usersSvc, bus,
 		cfg.JWTSecret,
 		time.Duration(cfg.JWTTTLHours)*time.Hour,
 		adminEmailSet(cfg.AdminEmails),
 	)
+
+	// Bridge: the in-process bus is per-process, but mail must cross to
+	// the worker. These subscribers convert mail events into durable
+	// send_mail River jobs (persisted in Postgres). Log-only events stay
+	// local — they prove the fan-out without leaving the process.
+	bridgeMailEvents(bus, riverClient, usersSvc, ordersSvc, cfg.AppURL)
 
 	return &app{
 		usersSvc:      usersSvc,
@@ -195,6 +206,83 @@ func adminEmailSet(emails []string) map[string]struct{} {
 		}
 	}
 	return set
+}
+
+// bridgeMailEvents converts mail-worthy domain events into durable
+// send_mail River jobs. Recipient resolution happens here (fresh DB
+// reads, not snapshots). Enqueue failures log — the event already
+// happened; a lost mail beats a failed request.
+func bridgeMailEvents(bus *events.Bus, riverClient *river.Client[pgx.Tx], users userspublic.Service, orders orderspublic.Service, appURL string) {
+	enqueue := func(to, subject, body string) {
+		if to == "" {
+			return
+		}
+		_, err := riverClient.Insert(context.Background(), jobs.SendMailArgs{
+			To: to, Subject: subject, Body: body,
+		}, nil)
+		if err != nil {
+			log.Printf("bridge: enqueue mail to %s failed: %v", to, err)
+		}
+	}
+	emailOf := func(ctx context.Context, userID string) string {
+		u, err := users.GetByID(ctx, userID)
+		if err != nil {
+			return ""
+		}
+		return u.Email
+	}
+
+	bus.Subscribe(authpublic.EmailVerificationRequested, func(_ context.Context, e events.Event) {
+		m, ok := e.Payload.(authpublic.VerificationMail)
+		if !ok {
+			return
+		}
+		name := m.Name
+		if name == "" {
+			name = m.Email
+		}
+		enqueue(m.Email, "Verify your email — Malawi Store",
+			"Hi "+name+",\n\nYour verification code is: "+m.Code+
+				"\n\nIt expires in 15 minutes.\n\n— Malawi Store")
+	})
+	bus.Subscribe(authpublic.PasswordResetRequested, func(_ context.Context, e events.Event) {
+		m, ok := e.Payload.(authpublic.ResetMail)
+		if !ok {
+			return
+		}
+		enqueue(m.Email, "Reset your password — Malawi Store",
+			"Hi "+m.Name+",\n\nReset your password here (valid 1 hour):\n"+
+				appURL+"/reset-password?token="+m.Token+
+				"\n\nDidn't ask? Ignore this mail.\n\n— Malawi Store")
+	})
+	bus.Subscribe(orderspublic.OrderPaid, func(ctx context.Context, e events.Event) {
+		o, ok := e.Payload.(orderspublic.Order)
+		if !ok || o.UserID == "" {
+			return
+		}
+		enqueue(emailOf(ctx, o.UserID), "Payment received — Malawi Store",
+			"Hi,\n\nWe received your payment for order "+o.ID+
+				". Your items are being prepared.\n\n— Malawi Store")
+	})
+	bus.Subscribe(paymentspublic.PaymentFailed, func(ctx context.Context, e events.Event) {
+		pay, ok := e.Payload.(paymentspublic.Payment)
+		if !ok {
+			return
+		}
+		o, err := orders.GetByRef(ctx, pay.OrderID)
+		if err != nil {
+			return
+		}
+		enqueue(emailOf(ctx, o.UserID), "Payment failed — Malawi Store",
+			"Hi,\n\nYour payment for order "+pay.OrderID+
+				" failed. Your cart is intact — try again.\n\n— Malawi Store")
+	})
+	bus.Subscribe(orderspublic.OrderCreated, func(_ context.Context, e events.Event) {
+		log.Printf("event: %s", e.Name)
+	})
+	bus.Subscribe(orderspublic.OrderCancelled, func(_ context.Context, e events.Event) {
+		log.Printf("event: %s", e.Name)
+	})
 }
 
 // newRouter builds the Gin engine with global middleware. Release mode in

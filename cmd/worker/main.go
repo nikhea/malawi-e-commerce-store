@@ -31,12 +31,11 @@ import (
 	media "github.com/nikhea/malawi-e-commerce-store/internal/media"
 	mediapublic "github.com/nikhea/malawi-e-commerce-store/internal/media/public"
 	orders "github.com/nikhea/malawi-e-commerce-store/internal/orders"
-	orderspublic "github.com/nikhea/malawi-e-commerce-store/internal/orders/public"
-	paymentspublic "github.com/nikhea/malawi-e-commerce-store/internal/payments/public"
 	products "github.com/nikhea/malawi-e-commerce-store/internal/products"
 	users "github.com/nikhea/malawi-e-commerce-store/internal/users"
 	variants "github.com/nikhea/malawi-e-commerce-store/internal/variants"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/events"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/mail"
 	pkgmedia "github.com/nikhea/malawi-e-commerce-store/pkg/media"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
@@ -73,9 +72,11 @@ func run(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error {
 	inventorySvc := inventory.Wire(pool)
 
 	bus := events.New()
-	subscribeNotifications(bus)
-
 	ordersSvc := orders.Wire(pool, cartSvc, inventorySvc, bus)
+
+	// SMTP sender for the send_mail queue. Misconfigured mail does NOT
+	// stop the worker (jobs still process); sends just log failures.
+	sender := mail.NewSMTPSender("smtp.gmail.com", 587, cfg.EmailAddress, cfg.EmailPassword, cfg.EmailAddress)
 
 	uploader, err := pkgmedia.NewCloudinaryUploader(pkgmedia.CloudinaryConfig{
 		CloudName: cfg.CloudName,
@@ -121,6 +122,10 @@ func run(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error {
 			return err
 		})
 	river.AddWorker(workers, jobs.NewExpireReservationsWorker(inventorySvc, ordersSvc))
+	// The worker's bus is local-only (nothing publishes into this
+	// process); mail arrives as durable send_mail River jobs from the
+	// API's bridge. This registration is what actually sends them.
+	river.AddWorker(workers, jobs.NewSendMailWorker(sender))
 
 	if err := riverClient.Start(ctx); err != nil {
 		return err
@@ -136,21 +141,4 @@ func run(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error {
 	}
 	log.Println("worker stopped")
 	return nil
-}
-
-// subscribeNotifications wires domain events to notification side effects.
-// v1 is structured logging (proves the fan-out live); the sendMail hook
-// below is where SMTP (EMAIL_* config) plugs in next.
-func subscribeNotifications(bus *events.Bus) {
-	notify := func(what string) events.Handler {
-		return func(ctx context.Context, e events.Event) {
-			log.Printf("notify: %s -> %s", what, e.Name)
-			// TODO(mail): sendMail(ctx, e) via net/smtp + EMAIL_* config.
-		}
-	}
-	bus.Subscribe(orderspublic.OrderCreated, notify("order received"))
-	bus.Subscribe(orderspublic.OrderPaid, notify("fulfill order"))
-	bus.Subscribe(orderspublic.OrderCancelled, notify("order cancelled"))
-	bus.Subscribe(paymentspublic.PaymentSucceeded, notify("payment receipt"))
-	bus.Subscribe(paymentspublic.PaymentFailed, notify("payment failed"))
 }

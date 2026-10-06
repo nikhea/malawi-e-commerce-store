@@ -91,6 +91,9 @@ func (f *fakeOrders) GetByID(_ context.Context, userID, orderID string) (ordersp
 	}
 	return o, nil
 }
+func (f *fakeOrders) GetByRef(_ context.Context, orderID string) (orderspublic.Order, error) {
+	return f.order(orderID)
+}
 func (f *fakeOrders) ListMine(context.Context, string) ([]orderspublic.Order, error) {
 	return nil, nil
 }
