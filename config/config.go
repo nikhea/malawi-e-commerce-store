@@ -51,6 +51,11 @@ type Config struct {
 	StripePricePro       string
 	StripePriceScale     string
 
+	// FXMWKPerUSD converts MWK tambala to USD cents for Stripe, which
+	// cannot charge MWK. Approximate rate, env-overridable; a real FX
+	// provider plugs in here when volumes justify it.
+	FXMWKPerUSD float64
+
 	QRSigningSecret string
 }
 
@@ -94,6 +99,9 @@ func Load() (Config, error) {
 	if cfg.JWTTTLHours, err = envIntOr("JWT_TTL_HOURS", 24); err != nil {
 		return Config{}, fmt.Errorf("invalid JWT_TTL_HOURS: %w", err)
 	}
+	if cfg.FXMWKPerUSD, err = envFloatOr("FX_MWK_PER_USD", 1700); err != nil || cfg.FXMWKPerUSD <= 0 {
+		return Config{}, fmt.Errorf("invalid FX_MWK_PER_USD: %w", err)
+	}
 	cfg.AdminEmails = envList("ADMIN_EMAILS")
 
 	if cfg.DatabaseURL == "" {
@@ -124,6 +132,14 @@ func envIntOr(key string, fallback int) (int, error) {
 		return fallback, nil
 	}
 	return strconv.Atoi(v)
+}
+
+func envFloatOr(key string, fallback float64) (float64, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback, nil
+	}
+	return strconv.ParseFloat(v, 64)
 }
 
 // envList parses a comma-separated env var, trimming spaces and dropping

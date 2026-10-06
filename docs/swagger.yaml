@@ -48,6 +48,14 @@ definitions:
     required:
     - name
     type: object
+  dto.CreateIntentRequest:
+    properties:
+      order_id:
+        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+        type: string
+    required:
+    - order_id
+    type: object
   dto.CreateProductRequest:
     properties:
       category_id:
@@ -328,6 +336,31 @@ definitions:
       unit_price_cents:
         type: integer
       variant_id:
+        type: string
+    type: object
+  public.Payment:
+    properties:
+      amount_cents:
+        example: 735
+        type: integer
+      client_secret:
+        type: string
+      created_at:
+        type: string
+      currency:
+        example: USD
+        type: string
+      id:
+        type: string
+      order_amount_cents:
+        example: 12500
+        type: integer
+      order_id:
+        type: string
+      status:
+        example: pending
+        type: string
+      stripe_intent_id:
         type: string
     type: object
   public.Product:
@@ -1492,6 +1525,46 @@ paths:
       summary: Check out my cart
       tags:
       - orders
+  /payments/intents:
+    post:
+      consumes:
+      - application/json
+      description: Validates ownership, converts the MWK total, reuses pending intents.
+      parameters:
+      - description: Order
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateIntentRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/public.Payment'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create a payment intent
+      tags:
+      - payments
   /products:
     get:
       description: Lightweight catalog rows (no variants — fetch Detail per product).
@@ -1684,6 +1757,35 @@ paths:
       summary: Get the caller's own account
       tags:
       - users
+  /webhooks/stripe:
+    post:
+      consumes:
+      - '*/*'
+      description: |-
+        Verifies the signature, settles the order. No JWT — the
+        signature IS the authentication. Mounted on the open group.
+      parameters:
+      - description: Stripe signature
+        in: header
+        name: Stripe-Signature
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      summary: Stripe webhook
+      tags:
+      - webhooks
 securityDefinitions:
   BearerAuth:
     description: JWT. Prefix with "Bearer ".

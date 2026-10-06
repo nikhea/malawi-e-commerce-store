@@ -29,6 +29,9 @@ import (
 	mediaservice "github.com/nikhea/malawi-e-commerce-store/internal/media/service"
 	orders "github.com/nikhea/malawi-e-commerce-store/internal/orders"
 	orderspublic "github.com/nikhea/malawi-e-commerce-store/internal/orders/public"
+	payments "github.com/nikhea/malawi-e-commerce-store/internal/payments"
+	paymentsgateway "github.com/nikhea/malawi-e-commerce-store/internal/payments/gateway"
+	paymentspublic "github.com/nikhea/malawi-e-commerce-store/internal/payments/public"
 	products "github.com/nikhea/malawi-e-commerce-store/internal/products"
 	productspublic "github.com/nikhea/malawi-e-commerce-store/internal/products/public"
 	users "github.com/nikhea/malawi-e-commerce-store/internal/users"
@@ -55,6 +58,7 @@ type app struct {
 	cartSvc       cartpublic.Service
 	inventorySvc  inventorypublic.Service
 	ordersSvc     orderspublic.Service
+	paymentsSvc   paymentspublic.Service
 	authSvc       authpublic.Service
 	mediaSvc      *mediaservice.Service
 	riverClient   *river.Client[pgx.Tx]
@@ -78,6 +82,9 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 	// because events only trigger repeatable side effects.
 	bus := events.New()
 	ordersSvc := orders.Wire(pool, cartSvc, inventorySvc, bus)
+	paymentsSvc := payments.Wire(pool, ordersSvc,
+		paymentsgateway.NewStripeGateway(cfg.StripeSecretKey), bus,
+		cfg.StripeWebhookSecret, cfg.FXMWKPerUSD)
 
 	uploader, err := pkgmedia.NewCloudinaryUploader(pkgmedia.CloudinaryConfig{
 		CloudName: cfg.CloudName,
@@ -132,6 +139,7 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 		cartSvc:       cartSvc,
 		inventorySvc:  inventorySvc,
 		ordersSvc:     ordersSvc,
+		paymentsSvc:   paymentsSvc,
 		authSvc:       authSvc,
 		mediaSvc:      mediaSvc,
 		riverClient:   riverClient,
@@ -191,6 +199,7 @@ func registerRoutes(r *gin.Engine, a *app) {
 	cart.RegisterRoutes(protected, a.cartSvc)
 	inventory.RegisterRoutes(protected, a.inventorySvc)
 	orders.RegisterRoutes(protected, a.ordersSvc)
+	payments.RegisterRoutes(open, protected, a.paymentsSvc)
 
 	// Generated API docs (docs/ is committed; refresh with
 	// `swag init -g cmd/api/main.go --parseInternal -o docs`).
