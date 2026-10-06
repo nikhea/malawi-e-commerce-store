@@ -3,11 +3,11 @@ package service
 import (
 	"context"
 	"strings"
-	"unicode"
 
 	"github.com/nikhea/malawi-e-commerce-store/internal/categories/model"
 	"github.com/nikhea/malawi-e-commerce-store/internal/categories/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/slug"
 )
 
 var _ public.Service = (*service)(nil)
@@ -31,29 +31,6 @@ func NewService(repo Repository) public.Service {
 	return &service{repo: repo}
 }
 
-// slugify turns "Cooking Oil & More!" into "cooking-oil-more".
-func slugify(name string) string {
-	name = strings.ToLower(strings.TrimSpace(name))
-	var b strings.Builder
-	prevHyphen := true // trim leading hyphens
-	for _, r := range name {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			b.WriteRune(r)
-			prevHyphen = false
-		case r == ' ' || r == '_' || r == '-':
-			if !prevHyphen {
-				b.WriteRune('-')
-				prevHyphen = true
-			}
-		case unicode.IsLetter(r):
-			// Non-ASCII letters (e.g. Chichewa diacritics) are dropped;
-			// slugs stay URL-safe ASCII.
-		}
-	}
-	return strings.Trim(b.String(), "-")
-}
-
 func toPublic(c model.Category) public.Category {
 	return public.Category{
 		ID: c.ID, Name: c.Name, Slug: c.Slug, Description: c.Description,
@@ -66,11 +43,11 @@ func (s *service) Create(ctx context.Context, in public.CreateCategoryInput) (pu
 	if name == "" {
 		return public.Category{}, apperr.Validation("name is required")
 	}
-	slug := strings.ToLower(strings.TrimSpace(in.Slug))
-	if slug == "" {
-		slug = slugify(name)
+	slugStr := strings.ToLower(strings.TrimSpace(in.Slug))
+	if slugStr == "" {
+		slugStr = slug.Make(name)
 	}
-	if slug == "" {
+	if slugStr == "" {
 		return public.Category{}, apperr.Validation("slug is required")
 	}
 	if in.ParentID != nil {
@@ -80,7 +57,7 @@ func (s *service) Create(ctx context.Context, in public.CreateCategoryInput) (pu
 	}
 
 	c, err := s.repo.Create(ctx, model.Category{
-		Name: name, Slug: slug,
+		Name: name, Slug: slugStr,
 		Description: strings.TrimSpace(in.Description),
 		ParentID:    in.ParentID,
 		ImageURL:    strings.TrimSpace(in.ImageURL),

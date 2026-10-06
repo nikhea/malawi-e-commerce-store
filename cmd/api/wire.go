@@ -19,8 +19,12 @@ import (
 	media "github.com/nikhea/malawi-e-commerce-store/internal/media"
 	mediapublic "github.com/nikhea/malawi-e-commerce-store/internal/media/public"
 	mediaservice "github.com/nikhea/malawi-e-commerce-store/internal/media/service"
+	products "github.com/nikhea/malawi-e-commerce-store/internal/products"
+	productspublic "github.com/nikhea/malawi-e-commerce-store/internal/products/public"
 	users "github.com/nikhea/malawi-e-commerce-store/internal/users"
 	userspublic "github.com/nikhea/malawi-e-commerce-store/internal/users/public"
+	variants "github.com/nikhea/malawi-e-commerce-store/internal/variants"
+	variantspublic "github.com/nikhea/malawi-e-commerce-store/internal/variants/public"
 	pkgmedia "github.com/nikhea/malawi-e-commerce-store/pkg/media"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/middleware"
 	"github.com/riverqueue/river"
@@ -35,18 +39,23 @@ import (
 type app struct {
 	usersSvc      userspublic.Service
 	categoriesSvc categoriespublic.Service
+	variantsSvc   variantspublic.Service
+	productsSvc   productspublic.Service
 	authSvc       authpublic.Service
 	mediaSvc      *mediaservice.Service
 	riverClient   *river.Client[pgx.Tx]
 }
 
 // wireApp assembles modules and infra in dependency order:
-// leaf services → uploader → River client → media pipeline → auth.
+// leaves (users, categories, variants) → products → uploader → River
+// client → media pipeline → auth.
 // Modules build via their index.go Wire entry points; only app-level
 // infra (uploader, River, admin set) is constructed here.
 func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, error) {
 	usersSvc := users.Wire(pool)
 	categoriesSvc := categories.Wire(pool)
+	variantsSvc := variants.Wire(pool)
+	productsSvc := products.Wire(pool, categoriesSvc, variantsSvc)
 
 	uploader, err := pkgmedia.NewCloudinaryUploader(pkgmedia.CloudinaryConfig{
 		CloudName: cfg.CloudName,
@@ -77,6 +86,11 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 			_, err := categoriesSvc.SetImage(ctx, ownerID, url, publicID)
 			return err
 		})
+	mediaSvc.RegisterComplete(mediapublic.OwnerProduct,
+		func(ctx context.Context, ownerID, url, publicID string) error {
+			_, err := productsSvc.SetImage(ctx, ownerID, url, publicID)
+			return err
+		})
 	if err := riverClient.Start(ctx); err != nil {
 		return nil, fmt.Errorf("river start: %w", err)
 	}
@@ -91,6 +105,8 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 	return &app{
 		usersSvc:      usersSvc,
 		categoriesSvc: categoriesSvc,
+		variantsSvc:   variantsSvc,
+		productsSvc:   productsSvc,
 		authSvc:       authSvc,
 		mediaSvc:      mediaSvc,
 		riverClient:   riverClient,
@@ -145,6 +161,8 @@ func registerRoutes(r *gin.Engine, a *app) {
 	protected.Use(middleware.JWT(a.authSvc))
 	users.RegisterRoutes(protected, a.usersSvc)
 	categories.RegisterRoutes(open, protected, a.categoriesSvc, a.mediaSvc)
+	variants.RegisterRoutes(open, protected, a.variantsSvc)
+	products.RegisterRoutes(open, protected, a.productsSvc, a.mediaSvc)
 
 	// Generated API docs (docs/ is committed; refresh with
 	// `swag init -g cmd/api/main.go --parseInternal -o docs`).

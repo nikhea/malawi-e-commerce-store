@@ -10,6 +10,7 @@ import "context"
 // here and one callback at the wiring site — no other media changes.
 const (
 	OwnerCategory = "category"
+	OwnerProduct  = "product"
 )
 
 // CompleteFunc stores the upload outcome on the owning record. Registered

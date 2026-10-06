@@ -35,6 +35,45 @@ definitions:
     required:
     - name
     type: object
+  dto.CreateProductRequest:
+    properties:
+      category_id:
+        type: string
+      currency:
+        example: MWK
+        type: string
+      description:
+        example: Pure sunflower oil
+        type: string
+      image_url:
+        type: string
+      name:
+        example: Sunseed Cooking Oil 2L
+        type: string
+      price_cents:
+        example: 12500
+        type: integer
+      slug:
+        example: sunseed-cooking-oil-2l
+        type: string
+    required:
+    - name
+    type: object
+  dto.CreateVariantRequest:
+    properties:
+      name:
+        example: 500ml
+        type: string
+      price_cents:
+        example: 2500
+        type: integer
+      sku:
+        example: OIL-500-001
+        type: string
+    required:
+    - name
+    - sku
+    type: object
   dto.LoginRequest:
     properties:
       email:
@@ -83,6 +122,32 @@ definitions:
       parent_id:
         type: string
     type: object
+  dto.UpdateProductRequest:
+    properties:
+      category_id:
+        type: string
+      clear_category:
+        type: boolean
+      currency:
+        type: string
+      description:
+        type: string
+      is_active:
+        type: boolean
+      name:
+        type: string
+      price_cents:
+        type: integer
+    type: object
+  dto.UpdateVariantRequest:
+    properties:
+      is_active:
+        type: boolean
+      name:
+        type: string
+      price_cents:
+        type: integer
+    type: object
   public.Category:
     properties:
       created_at:
@@ -103,6 +168,47 @@ definitions:
         type: string
       slug:
         example: cooking-oil
+        type: string
+    type: object
+  public.Detail:
+    properties:
+      product:
+        $ref: '#/definitions/public.Product'
+      variants:
+        items:
+          $ref: '#/definitions/public.VariantView'
+        type: array
+    type: object
+  public.Product:
+    properties:
+      category_id:
+        type: string
+      category_name:
+        example: Cooking Oil
+        type: string
+      created_at:
+        type: string
+      currency:
+        example: MWK
+        type: string
+      description:
+        example: Pure sunflower oil
+        type: string
+      id:
+        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+        type: string
+      image_url:
+        type: string
+      is_active:
+        type: boolean
+      name:
+        example: Sunseed Cooking Oil
+        type: string
+      price_cents:
+        example: 12500
+        type: integer
+      slug:
+        example: sunseed-cooking-oil
         type: string
     type: object
   public.Role:
@@ -150,6 +256,43 @@ definitions:
         allOf:
         - $ref: '#/definitions/public.Role'
         example: customer
+    type: object
+  public.Variant:
+    properties:
+      created_at:
+        type: string
+      id:
+        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+        type: string
+      is_active:
+        type: boolean
+      name:
+        example: 500ml
+        type: string
+      price_cents:
+        example: 2500
+        type: integer
+      product_id:
+        type: string
+      sku:
+        example: OIL-500-001
+        type: string
+    type: object
+  public.VariantView:
+    properties:
+      id:
+        type: string
+      is_active:
+        type: boolean
+      name:
+        example: 500ml
+        type: string
+      price_cents:
+        example: 2500
+        type: integer
+      sku:
+        example: OIL-500-001
+        type: string
     type: object
   response.ErrorDetail:
     properties:
@@ -335,6 +478,170 @@ paths:
       summary: Upload a category image (admin)
       tags:
       - admin
+  /admin/products:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Product
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateProductRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/public.Product'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create a product (admin)
+      tags:
+      - admin
+  /admin/products/{id}:
+    delete:
+      description: Hard delete — variants cascade. Prefer deactivating.
+      parameters:
+      - description: Product ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete a product (admin)
+      tags:
+      - admin
+    patch:
+      consumes:
+      - application/json
+      description: Slug is immutable. Pass clear_category to unfile.
+      parameters:
+      - description: Product ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Fields
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateProductRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.Product'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update a product (admin)
+      tags:
+      - admin
+  /admin/products/{id}/image:
+    post:
+      consumes:
+      - multipart/form-data
+      description: Multipart upload via the River queue (202 immediately).
+      parameters:
+      - description: Product ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Image (max 10 MiB)
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Upload a product image (admin)
+      tags:
+      - admin
   /admin/users/{id}/role:
     patch:
       consumes:
@@ -378,6 +685,80 @@ paths:
       security:
       - BearerAuth: []
       summary: Change a user's role (admin)
+      tags:
+      - admin
+  /admin/variants/{id}:
+    delete:
+      parameters:
+      - description: Variant ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete a variant (admin)
+      tags:
+      - admin
+    patch:
+      consumes:
+      - application/json
+      description: product_id and sku are immutable.
+      parameters:
+      - description: Variant ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Fields
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateVariantRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.Variant'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update a variant (admin)
       tags:
       - admin
   /auth/login:
@@ -501,6 +882,152 @@ paths:
       summary: Get category by slug
       tags:
       - categories
+  /products:
+    get:
+      description: Lightweight catalog rows (no variants — fetch Detail per product).
+      parameters:
+      - description: Filter by category
+        in: query
+        name: category_id
+        type: string
+      - description: Hide inactive (default true)
+        in: query
+        name: active_only
+        type: boolean
+      - description: Page size (default 20, max 100)
+        in: query
+        name: limit
+        type: integer
+      - description: Page offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/public.Product'
+            type: array
+      summary: List products
+      tags:
+      - products
+  /products/{id}:
+    get:
+      description: Product + its variants (the storefront product page).
+      parameters:
+      - description: Product ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.Detail'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      summary: Get product detail by ID
+      tags:
+      - products
+  /products/{id}/variants:
+    get:
+      description: Public SKU list for the storefront product page.
+      parameters:
+      - description: Product ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/public.Variant'
+            type: array
+      summary: List a product's variants
+      tags:
+      - products
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Product ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: SKU
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateVariantRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/public.Variant'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create a variant (admin)
+      tags:
+      - admin
+  /products/slug/{slug}:
+    get:
+      description: Pretty-URL lookup used by the storefront.
+      parameters:
+      - description: Product slug
+        in: path
+        name: slug
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.Detail'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      summary: Get product detail by slug
+      tags:
+      - products
   /users/{id}:
     get:
       description: Returns one account wrapped in the standard {"data"} envelope.
