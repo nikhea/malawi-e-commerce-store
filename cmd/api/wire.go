@@ -12,6 +12,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nikhea/malawi-e-commerce-store/config"
+	// Blank import: runs docs.init(), which registers the spec with the
+	// swag registry. Without it /swagger/doc.json 500s — and nothing at
+	// compile time warns you, since side-effect imports are invisible.
+	_ "github.com/nikhea/malawi-e-commerce-store/docs"
 	auth "github.com/nikhea/malawi-e-commerce-store/internal/auth"
 	authpublic "github.com/nikhea/malawi-e-commerce-store/internal/auth/public"
 	categories "github.com/nikhea/malawi-e-commerce-store/internal/categories"
