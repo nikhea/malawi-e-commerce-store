@@ -2338,7 +2338,7 @@ paths:
       - wishlist
 securityDefinitions:
   BearerAuth:
-    description: JWT. Prefix with "Bearer ".
+    description: JWT — paste with or without the "Bearer" prefix.
     in: header
     name: Authorization
     type: apiKey

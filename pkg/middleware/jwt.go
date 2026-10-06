@@ -18,14 +18,19 @@ const userIDKey = "user_id"
 // and future per-user scoping). It takes the auth PUBLIC interface, so
 // this package never imports auth/service, auth/utils, or any repository.
 //
+// Prefix tolerance: "Bearer <token>" is canonical, but bare tokens are
+// accepted too — Swagger UI's apiKey box sends the raw value with no
+// prefix, and rejecting it only punishes tooling. The prefix carries no
+// security (verification does), so tolerance costs nothing.
+//
 // CSRF note: tokens ride the Authorization header (never cookies), so
 // browsers never attach them cross-origin — this API is CSRF-immune by
 // construction. If cookie auth is ever added, pair it with SameSite +
 // anti-CSRF tokens and revisit this claim.
 func JWT(authSvc authpublic.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		token, ok := strings.CutPrefix(c.GetHeader("Authorization"), "Bearer ")
-		if !ok || strings.TrimSpace(token) == "" {
+		token := bearerToken(c.GetHeader("Authorization"))
+		if token == "" {
 			response.Error(c, apperr.Unauthorized("authentication required"))
 			c.Abort()
 			return
@@ -40,6 +45,20 @@ func JWT(authSvc authpublic.Service) gin.HandlerFunc {
 		c.Set(userIDKey, claims.UserID)
 		c.Next()
 	}
+}
+
+// bearerToken extracts the JWT: "Bearer <token>" preferred, bare token
+// tolerated (Swagger UI's apiKey box sends the raw value). A bare value
+// must look like a JWT (three dot-separated segments, no spaces) —
+// anything else is treated as missing, not as a token.
+func bearerToken(header string) string {
+	if t, ok := strings.CutPrefix(header, "Bearer "); ok {
+		return strings.TrimSpace(t)
+	}
+	if t := strings.TrimSpace(header); strings.Count(t, ".") == 2 && !strings.Contains(t, " ") {
+		return t
+	}
+	return ""
 }
 
 // UserIDOf returns the caller id stored by JWT, or "" when the middleware

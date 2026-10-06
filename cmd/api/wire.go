@@ -277,6 +277,8 @@ func registerRoutes(r *gin.Engine, a *app) {
 	// Generated API docs (docs/ is committed; refresh with
 	// `swag init -g cmd/api/main.go --parseInternal -o docs`).
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerfiles.Handler))
+	// Dark reference UI (Scalar, CDN). Offline? Use /swagger instead.
+	registerScalarDocs(r)
 }
 
 // newServer builds the HTTP server with production timeouts: header reads
