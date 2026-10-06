@@ -27,12 +27,15 @@ import (
 	media "github.com/nikhea/malawi-e-commerce-store/internal/media"
 	mediapublic "github.com/nikhea/malawi-e-commerce-store/internal/media/public"
 	mediaservice "github.com/nikhea/malawi-e-commerce-store/internal/media/service"
+	orders "github.com/nikhea/malawi-e-commerce-store/internal/orders"
+	orderspublic "github.com/nikhea/malawi-e-commerce-store/internal/orders/public"
 	products "github.com/nikhea/malawi-e-commerce-store/internal/products"
 	productspublic "github.com/nikhea/malawi-e-commerce-store/internal/products/public"
 	users "github.com/nikhea/malawi-e-commerce-store/internal/users"
 	userspublic "github.com/nikhea/malawi-e-commerce-store/internal/users/public"
 	variants "github.com/nikhea/malawi-e-commerce-store/internal/variants"
 	variantspublic "github.com/nikhea/malawi-e-commerce-store/internal/variants/public"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/events"
 	pkgmedia "github.com/nikhea/malawi-e-commerce-store/pkg/media"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/middleware"
 	"github.com/riverqueue/river"
@@ -51,6 +54,7 @@ type app struct {
 	productsSvc   productspublic.Service
 	cartSvc       cartpublic.Service
 	inventorySvc  inventorypublic.Service
+	ordersSvc     orderspublic.Service
 	authSvc       authpublic.Service
 	mediaSvc      *mediaservice.Service
 	riverClient   *river.Client[pgx.Tx]
@@ -68,6 +72,12 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 	productsSvc := products.Wire(pool, categoriesSvc, variantsSvc)
 	cartSvc := cart.Wire(pool, productsSvc, usersSvc)
 	inventorySvc := inventory.Wire(pool)
+
+	// In-process event bus: orders publishes, payments and notification
+	// senders will subscribe. No persistence — restart drops nothing
+	// because events only trigger repeatable side effects.
+	bus := events.New()
+	ordersSvc := orders.Wire(pool, cartSvc, inventorySvc, bus)
 
 	uploader, err := pkgmedia.NewCloudinaryUploader(pkgmedia.CloudinaryConfig{
 		CloudName: cfg.CloudName,
@@ -121,6 +131,7 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 		productsSvc:   productsSvc,
 		cartSvc:       cartSvc,
 		inventorySvc:  inventorySvc,
+		ordersSvc:     ordersSvc,
 		authSvc:       authSvc,
 		mediaSvc:      mediaSvc,
 		riverClient:   riverClient,
@@ -179,6 +190,7 @@ func registerRoutes(r *gin.Engine, a *app) {
 	products.RegisterRoutes(open, protected, a.productsSvc, a.mediaSvc)
 	cart.RegisterRoutes(protected, a.cartSvc)
 	inventory.RegisterRoutes(protected, a.inventorySvc)
+	orders.RegisterRoutes(protected, a.ordersSvc)
 
 	// Generated API docs (docs/ is committed; refresh with
 	// `swag init -g cmd/api/main.go --parseInternal -o docs`).

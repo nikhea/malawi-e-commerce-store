@@ -292,6 +292,44 @@ definitions:
       variant_id:
         type: string
     type: object
+  public.Order:
+    properties:
+      created_at:
+        type: string
+      currency:
+        example: MWK
+        type: string
+      id:
+        type: string
+      lines:
+        items:
+          $ref: '#/definitions/public.OrderLine'
+        type: array
+      status:
+        example: pending
+        type: string
+      subtotal_cents:
+        type: integer
+      user_id:
+        type: string
+    type: object
+  public.OrderLine:
+    properties:
+      line_total_cents:
+        type: integer
+      name:
+        type: string
+      product_id:
+        type: string
+      qty:
+        type: integer
+      sku:
+        type: string
+      unit_price_cents:
+        type: integer
+      variant_id:
+        type: string
+    type: object
   public.Product:
     properties:
       category_id:
@@ -1345,6 +1383,115 @@ paths:
       summary: Get category by slug
       tags:
       - categories
+  /orders:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/public.Order'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List my orders
+      tags:
+      - orders
+  /orders/{id}:
+    get:
+      parameters:
+      - description: Order ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.Order'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get my order by ID
+      tags:
+      - orders
+  /orders/{id}/cancel:
+    post:
+      description: Releases the stock hold. Pending orders only.
+      parameters:
+      - description: Order ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.Order'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Cancel my pending order
+      tags:
+      - orders
+  /orders/checkout:
+    post:
+      description: Freezes the cart into a pending order, reserves stock, clears the
+        cart.
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/public.Order'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Check out my cart
+      tags:
+      - orders
   /products:
     get:
       description: Lightweight catalog rows (no variants — fetch Detail per product).
