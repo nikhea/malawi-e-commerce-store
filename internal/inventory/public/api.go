@@ -38,4 +38,7 @@ type Service interface {
 	ReleaseByOrder(ctx context.Context, orderRef string) error
 	// ConfirmByOrder converts holds into sales (payment path).
 	ConfirmByOrder(ctx context.Context, orderRef string) error
+	// ReleaseExpired frees all holds past their TTL and returns the
+	// affected order refs (worker expiry sweep; orders cancels them).
+	ReleaseExpired(ctx context.Context) ([]string, error)
 }

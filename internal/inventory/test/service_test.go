@@ -95,6 +95,10 @@ func (f *fakeRepo) ConfirmByOrder(_ context.Context, orderRef string) error {
 	return f.settle(orderRef, true)
 }
 
+func (f *fakeRepo) ReleaseExpired(_ context.Context) ([]string, error) {
+	return nil, nil
+}
+
 func newService() public.Service {
 	return service.NewService(newFakeRepo())
 }

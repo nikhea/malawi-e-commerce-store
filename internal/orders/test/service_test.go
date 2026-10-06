@@ -140,6 +140,10 @@ func (f *fakeInventory) ConfirmByOrder(_ context.Context, orderRef string) error
 	return nil
 }
 
+func (f *fakeInventory) ReleaseExpired(_ context.Context) ([]string, error) {
+	return nil, nil
+}
+
 type fixture struct {
 	svc       public.Service
 	cart      *fakeCart

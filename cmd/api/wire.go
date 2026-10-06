@@ -24,6 +24,7 @@ import (
 	categoriespublic "github.com/nikhea/malawi-e-commerce-store/internal/categories/public"
 	inventory "github.com/nikhea/malawi-e-commerce-store/internal/inventory"
 	inventorypublic "github.com/nikhea/malawi-e-commerce-store/internal/inventory/public"
+	jobs "github.com/nikhea/malawi-e-commerce-store/internal/jobs"
 	media "github.com/nikhea/malawi-e-commerce-store/internal/media"
 	mediapublic "github.com/nikhea/malawi-e-commerce-store/internal/media/public"
 	mediaservice "github.com/nikhea/malawi-e-commerce-store/internal/media/service"
@@ -109,6 +110,18 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 			river.QueueDefault: {MaxWorkers: 10},
 		},
 		Workers: workers,
+		// The expiry sweep is registered on EVERY client: River elects
+		// one leader to schedule, and the job is idempotent, so
+		// overlapping boots converge instead of double-processing.
+		PeriodicJobs: []*river.PeriodicJob{
+			river.NewPeriodicJob(
+				river.PeriodicInterval(time.Minute),
+				func() (river.JobArgs, *river.InsertOpts) {
+					return jobs.ExpireReservationsArgs{}, nil
+				},
+				&river.PeriodicJobOpts{RunOnStart: true},
+			),
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("river client: %w", err)
@@ -116,6 +129,9 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 
 	mediaSvc := media.Wire(riverClient, uploader)
 	river.AddWorker(workers, mediaSvc)
+	// The expiry worker runs here too (same idempotent job): the sweep
+	// works with api alone, worker alone, or both — whoever is up.
+	river.AddWorker(workers, jobs.NewExpireReservationsWorker(inventorySvc, ordersSvc))
 	// Completion callbacks: the worker calls these after a successful
 	// upload. New image owners add one RegisterComplete line here.
 	mediaSvc.RegisterComplete(mediapublic.OwnerCategory,

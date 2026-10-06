@@ -19,6 +19,7 @@ type Repository interface {
 	Reserve(ctx context.Context, orderRef string, lines []model.Reservation, expiresAt time.Time) error
 	ReleaseByOrder(ctx context.Context, orderRef string) error
 	ConfirmByOrder(ctx context.Context, orderRef string) error
+	ReleaseExpired(ctx context.Context) ([]string, error)
 }
 
 type service struct {
@@ -99,4 +100,8 @@ func (s *service) ConfirmByOrder(ctx context.Context, orderRef string) error {
 		return apperr.Validation("order ref is required")
 	}
 	return s.repo.ConfirmByOrder(ctx, orderRef)
+}
+
+func (s *service) ReleaseExpired(ctx context.Context) ([]string, error) {
+	return s.repo.ReleaseExpired(ctx)
 }

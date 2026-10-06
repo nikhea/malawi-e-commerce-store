@@ -11,9 +11,13 @@ Module path: `github.com/nikhea/malawi-e-commerce-store`. Go 1.27.1.
 ├── cmd/
 │   ├── api/            # HTTP entrypoint. main.go builds the Gin engine,
 │   │   └── main.go     # wires config→db→repositories→services→handlers→routes, serves :8080
-│   └── worker/         # Background entrypoint (jobs: email, webhooks, inventory sync).
-│                       # NOTE: currently a stub (`package worker`, no main). Must become
-│                       # `package main` with its own wiring before it can run.
+│   └── worker/         # Background entrypoint: works the River queue (media
+│                       # uploads), sweeps expired reservations every minute,
+│                       # subscribes to domain events (log-based notify v1).
+│                       # Run alongside the API in dev: `go run ./cmd/worker`.
+│                       # Expiry orchestration lives in internal/jobs/ so BOTH
+│                       # api and worker can schedule/work it (River elects
+│                       # one scheduler; the job is idempotent).
 ├── internal/           # All business modules. NEVER import internal/* from outside the module
 │   │                   # except via that module's public/ package (see §3).
 │   ├── auth/           # Reference layout — the only fully-scaffolded module (all dirs still empty):
@@ -145,6 +149,7 @@ Local Stripe webhooks:
 
 ```bash
 air                              # dev with live-reload (loads .env via .air.toml env_files)
+go run ./cmd/worker               # background worker alongside air (River jobs, expiry sweep, notify)
 go build ./...                   # full build — must be green before commit
 go vet ./...                     # static checks — must be green before commit
 go test ./...                    # all module tests (per-module: go test ./internal/<name>/...)
@@ -201,6 +206,7 @@ swag init -g cmd/api/main.go --parseInternal -o docs   # regenerate API docs
 - Orders (`693c4db`): checkout freezing cart into pending orders, guarded pending→paid|cancelled transitions, crash-safe MarkPaid, `pkg/events` bus with OrderCreated/Paid/Cancelled (`0008`).
 - Payments (`ffad265`): Stripe intents with MWK→USD conversion, HMAC webhooks settling orders, idempotent retries, `PaymentSucceeded/Failed` events (`0009`).
 - Wishlist + reviews (this change): idempotent hearts with catalog snapshots (`0010`); one-review-per-user with author snapshots, SQL aggregates, owner isolation + admin moderation (`0011`, `0012`).
+- Worker + expiry sweep (this change): `cmd/worker` runs media uploads, the cron expiry job, and log-based notify subscribers; `internal/jobs` shared so api + worker both schedule/work it; `ReleaseExpired` closes the abandoned-checkout loop.
 
 Rules for this section: one bullet per landed module, commit hash included,
 key decisions noted (they explain otherwise-surprising code). Keep it to
