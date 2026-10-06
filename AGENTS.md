@@ -199,7 +199,8 @@ swag init -g cmd/api/main.go --parseInternal -o docs   # regenerate API docs
 - Cart (`6741063`): one cart per user, catalog-validated adds with price snapshots, COALESCE-index line merge, JWT-only routes (`0006`).
 - Inventory (`8c8c1d9`): on-hand + reserved counters with CHECK guard, transactional reserve/release/confirm, idempotent settle, admin-only routes (`0007`).
 - Orders (`693c4db`): checkout freezing cart into pending orders, guarded pending→paid|cancelled transitions, crash-safe MarkPaid, `pkg/events` bus with OrderCreated/Paid/Cancelled (`0008`).
-- Payments (this change): Stripe intents with MWK→USD conversion, HMAC webhooks settling orders, idempotent retries, `PaymentSucceeded/Failed` events (`0009`).
+- Payments (`ffad265`): Stripe intents with MWK→USD conversion, HMAC webhooks settling orders, idempotent retries, `PaymentSucceeded/Failed` events (`0009`).
+- Wishlist + reviews (this change): idempotent hearts with catalog snapshots (`0010`); one-review-per-user with author snapshots, SQL aggregates, owner isolation + admin moderation (`0011`, `0012`).
 
 Rules for this section: one bullet per landed module, commit hash included,
 key decisions noted (they explain otherwise-surprising code). Keep it to

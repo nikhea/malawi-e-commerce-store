@@ -34,10 +34,14 @@ import (
 	paymentspublic "github.com/nikhea/malawi-e-commerce-store/internal/payments/public"
 	products "github.com/nikhea/malawi-e-commerce-store/internal/products"
 	productspublic "github.com/nikhea/malawi-e-commerce-store/internal/products/public"
+	reviews "github.com/nikhea/malawi-e-commerce-store/internal/reviews"
+	reviewspublic "github.com/nikhea/malawi-e-commerce-store/internal/reviews/public"
 	users "github.com/nikhea/malawi-e-commerce-store/internal/users"
 	userspublic "github.com/nikhea/malawi-e-commerce-store/internal/users/public"
 	variants "github.com/nikhea/malawi-e-commerce-store/internal/variants"
 	variantspublic "github.com/nikhea/malawi-e-commerce-store/internal/variants/public"
+	wishlist "github.com/nikhea/malawi-e-commerce-store/internal/wishlist"
+	wishlistpublic "github.com/nikhea/malawi-e-commerce-store/internal/wishlist/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/events"
 	pkgmedia "github.com/nikhea/malawi-e-commerce-store/pkg/media"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/middleware"
@@ -59,6 +63,8 @@ type app struct {
 	inventorySvc  inventorypublic.Service
 	ordersSvc     orderspublic.Service
 	paymentsSvc   paymentspublic.Service
+	wishlistSvc   wishlistpublic.Service
+	reviewsSvc    reviewspublic.Service
 	authSvc       authpublic.Service
 	mediaSvc      *mediaservice.Service
 	riverClient   *river.Client[pgx.Tx]
@@ -82,6 +88,8 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 	// because events only trigger repeatable side effects.
 	bus := events.New()
 	ordersSvc := orders.Wire(pool, cartSvc, inventorySvc, bus)
+	wishlistSvc := wishlist.Wire(pool, productsSvc, usersSvc)
+	reviewsSvc := reviews.Wire(pool, productsSvc, usersSvc)
 	paymentsSvc := payments.Wire(pool, ordersSvc,
 		paymentsgateway.NewStripeGateway(cfg.StripeSecretKey), bus,
 		cfg.StripeWebhookSecret, cfg.FXMWKPerUSD)
@@ -140,6 +148,8 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 		inventorySvc:  inventorySvc,
 		ordersSvc:     ordersSvc,
 		paymentsSvc:   paymentsSvc,
+		wishlistSvc:   wishlistSvc,
+		reviewsSvc:    reviewsSvc,
 		authSvc:       authSvc,
 		mediaSvc:      mediaSvc,
 		riverClient:   riverClient,
@@ -200,6 +210,8 @@ func registerRoutes(r *gin.Engine, a *app) {
 	inventory.RegisterRoutes(protected, a.inventorySvc)
 	orders.RegisterRoutes(protected, a.ordersSvc)
 	payments.RegisterRoutes(open, protected, a.paymentsSvc)
+	wishlist.RegisterRoutes(protected, a.wishlistSvc)
+	reviews.RegisterRoutes(open, protected, a.reviewsSvc)
 
 	// Generated API docs (docs/ is committed; refresh with
 	// `swag init -g cmd/api/main.go --parseInternal -o docs`).

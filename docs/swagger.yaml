@@ -29,6 +29,14 @@ definitions:
     required:
     - product_id
     type: object
+  dto.AddWishlistRequest:
+    properties:
+      product_id:
+        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+        type: string
+    required:
+    - product_id
+    type: object
   dto.CreateCategoryRequest:
     properties:
       description:
@@ -79,6 +87,20 @@ definitions:
         type: string
     required:
     - name
+    type: object
+  dto.CreateReviewRequest:
+    properties:
+      body:
+        example: Lasted the whole month
+        type: string
+      rating:
+        example: 5
+        type: integer
+      title:
+        example: Great oil
+        type: string
+    required:
+    - rating
     type: object
   dto.CreateVariantRequest:
     properties:
@@ -215,6 +237,15 @@ definitions:
       price_cents:
         type: integer
     type: object
+  dto.UpdateReviewRequest:
+    properties:
+      body:
+        type: string
+      rating:
+        type: integer
+      title:
+        type: string
+    type: object
   dto.UpdateVariantRequest:
     properties:
       is_active:
@@ -272,6 +303,15 @@ definitions:
         items:
           $ref: '#/definitions/public.VariantView'
         type: array
+    type: object
+  public.Item:
+    properties:
+      added_at:
+        type: string
+      product:
+        $ref: '#/definitions/public.ProductSummary'
+      product_id:
+        type: string
     type: object
   public.Line:
     properties:
@@ -395,6 +435,48 @@ definitions:
         example: sunseed-cooking-oil
         type: string
     type: object
+  public.ProductSummary:
+    properties:
+      currency:
+        example: MWK
+        type: string
+      id:
+        type: string
+      image_url:
+        type: string
+      name:
+        example: Sunseed Cooking Oil 2L
+        type: string
+      price_cents:
+        example: 12500
+        type: integer
+      slug:
+        example: sunseed-cooking-oil-2l
+        type: string
+    type: object
+  public.Review:
+    properties:
+      author:
+        example: Aisha B.
+        type: string
+      body:
+        example: Lasted the whole month
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      product_id:
+        type: string
+      rating:
+        example: 5
+        type: integer
+      title:
+        example: Great oil
+        type: string
+      user_id:
+        type: string
+    type: object
   public.Role:
     enum:
     - admin
@@ -418,6 +500,19 @@ definitions:
         type: integer
       variant_id:
         type: string
+    type: object
+  public.Summary:
+    properties:
+      average:
+        example: 4.5
+        type: number
+      count:
+        example: 12
+        type: integer
+      reviews:
+        items:
+          $ref: '#/definitions/public.Review'
+        type: array
     type: object
   public.TokenPair:
     properties:
@@ -1034,6 +1129,37 @@ paths:
       summary: Upload a product image (admin)
       tags:
       - admin
+  /admin/reviews/{id}:
+    delete:
+      description: 'Moderation: abusive or spam reviews.'
+      parameters:
+      - description: Review ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Remove any review (admin)
+      tags:
+      - admin
   /admin/users/{id}/role:
     patch:
       consumes:
@@ -1620,6 +1746,69 @@ paths:
       summary: Get product detail by ID
       tags:
       - products
+  /products/{id}/reviews:
+    get:
+      description: 'Public page: average, count, newest-first reviews.'
+      parameters:
+      - description: Product ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.Summary'
+      summary: Product reviews + aggregate
+      tags:
+      - products
+    post:
+      consumes:
+      - application/json
+      description: One review per user per product — edit to change it.
+      parameters:
+      - description: Product ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Verdict
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateReviewRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/public.Review'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Review a product
+      tags:
+      - reviews
   /products/{id}/variants:
     get:
       description: Public SKU list for the storefront product page.
@@ -1711,6 +1900,71 @@ paths:
       summary: Get product detail by slug
       tags:
       - products
+  /reviews/{id}:
+    delete:
+      parameters:
+      - description: Review ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete my review
+      tags:
+      - reviews
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: Review ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Fields
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateReviewRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.Review'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Edit my review
+      tags:
+      - reviews
   /users/{id}:
     get:
       description: Returns one account wrapped in the standard {"data"} envelope.
@@ -1786,6 +2040,91 @@ paths:
       summary: Stripe webhook
       tags:
       - webhooks
+  /wishlist:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/public.Item'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List my wishlist
+      tags:
+      - wishlist
+    post:
+      consumes:
+      - application/json
+      description: 'Idempotent: re-hearting succeeds silently.'
+      parameters:
+      - description: Product
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AddWishlistRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/public.Item'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Heart a product
+      tags:
+      - wishlist
+  /wishlist/{id}:
+    delete:
+      parameters:
+      - description: Product ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Unheart a product
+      tags:
+      - wishlist
 securityDefinitions:
   BearerAuth:
     description: JWT. Prefix with "Bearer ".
