@@ -6,13 +6,12 @@ import (
 	"testing"
 	"time"
 
-	authpublic "github.com/nikhea/malawi-e-commerce-store/internal/auth/public"
 	"github.com/nikhea/malawi-e-commerce-store/internal/auth/model"
+	authpublic "github.com/nikhea/malawi-e-commerce-store/internal/auth/public"
 	"github.com/nikhea/malawi-e-commerce-store/internal/auth/service"
 	"github.com/nikhea/malawi-e-commerce-store/internal/auth/utils"
 	userspublic "github.com/nikhea/malawi-e-commerce-store/internal/users/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
-	"github.com/nikhea/malawi-e-commerce-store/pkg/events"
 )
 
 // fakeUsers is an in-memory userspublic.Service.
@@ -190,21 +189,36 @@ func (f *fakeAuthRepo) RefreshUsedElsewhere(_ context.Context, tokenHash string)
 }
 
 type fixture struct {
-	svc       authpublic.Service
-	users     *fakeUsers
-	published map[string][]events.Event
+	svc    authpublic.Service
+	users  *fakeUsers
+	mailer *fakeMailer
+}
+
+// fakeMailer records OTP/reset deliveries instead of sending.
+type fakeMailer struct {
+	verifications []verificationMail
+	resets        []resetMail
+}
+
+type verificationMail struct {
+	UserID, Email, Name, Code string
+}
+
+type resetMail struct {
+	UserID, Email, Name, Token string
+}
+
+func (f *fakeMailer) SendVerification(_ context.Context, userID, email, name, code string) {
+	f.verifications = append(f.verifications, verificationMail{UserID: userID, Email: email, Name: name, Code: code})
+}
+
+func (f *fakeMailer) SendReset(_ context.Context, userID, email, name, token string) {
+	f.resets = append(f.resets, resetMail{UserID: userID, Email: email, Name: name, Token: token})
 }
 
 func newFixture() *fixture {
-	fx := &fixture{users: newFakeUsers(), published: map[string][]events.Event{}}
-	bus := events.New()
-	for _, name := range []string{authpublic.EmailVerificationRequested, authpublic.PasswordResetRequested} {
-		name := name
-		bus.Subscribe(name, func(_ context.Context, e events.Event) {
-			fx.published[name] = append(fx.published[name], e)
-		})
-	}
-	fx.svc = service.NewService(fx.users, newFakeAuthRepo(), bus, service.Config{
+	fx := &fixture{users: newFakeUsers(), mailer: &fakeMailer{}}
+	fx.svc = service.NewService(fx.users, newFakeAuthRepo(), fx.mailer, service.Config{
 		Secret:      "test-secret",
 		TTL:         time.Hour,
 		AdminEmails: map[string]struct{}{"boss@malawi.mw": {}},
@@ -213,9 +227,8 @@ func newFixture() *fixture {
 }
 
 func testService(users userspublic.Service) authpublic.Service {
-	fx := &fixture{users: users.(*fakeUsers), published: map[string][]events.Event{}}
-	bus := events.New()
-	return service.NewService(fx.users, newFakeAuthRepo(), bus, service.Config{
+	fx := &fixture{users: users.(*fakeUsers), mailer: &fakeMailer{}}
+	return service.NewService(fx.users, newFakeAuthRepo(), fx.mailer, service.Config{
 		Secret:      "test-secret",
 		TTL:         time.Hour,
 		AdminEmails: map[string]struct{}{"boss@malawi.mw": {}},
@@ -340,12 +353,12 @@ func TestVerificationFlow(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 
-	// Register publishes the OTP mail event.
-	mails := fx.published[authpublic.EmailVerificationRequested]
+	// Register triggers the OTP mail.
+	mails := fx.mailer.verifications
 	if len(mails) != 1 {
 		t.Fatalf("expected 1 verification mail, got %d", len(mails))
 	}
-	code := mails[0].Payload.(authpublic.VerificationMail).Code
+	code := mails[0].Code
 	if len(code) != 6 {
 		t.Fatalf("bad OTP format: %q", code)
 	}
@@ -387,11 +400,11 @@ func TestPasswordResetFlow(t *testing.T) {
 	if err := fx.svc.RequestPasswordReset(ctx, "ghost@malawi.mw"); err != nil {
 		t.Fatalf("unknown email should succeed: %v", err)
 	}
-	mails := fx.published[authpublic.PasswordResetRequested]
+	mails := fx.mailer.resets
 	if len(mails) != 1 {
 		t.Fatalf("expected 1 reset mail, got %d", len(mails))
 	}
-	token := mails[0].Payload.(authpublic.ResetMail).Token
+	token := mails[0].Token
 
 	if err := fx.svc.ResetPassword(ctx, token, "short"); apperr.CodeOf(err) != apperr.CodeValidation {
 		t.Fatalf("expected VALIDATION_ERROR, got %v", err)

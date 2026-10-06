@@ -3,11 +3,9 @@ package main
 // Worker: background job processing for the modular monolith.
 //
 // Runs WITHOUT an HTTP server:
-//   - works the River "default" queue (async media uploads to Cloudinary),
+//   - works the River "default" queue (media uploads, send_mail),
 //   - sweeps expired stock reservations every minute (releases holds,
-//     cancels their orders),
-//   - subscribes to domain events for notifications (log-based v1 — the
-//     send-mail hook is marked below for the SMTP step).
+//     cancels their orders).
 //
 // The API (cmd/api) enqueues; this process works. Either or both may run:
 // River distributes each job once. Local dev: `air` in one terminal,
@@ -31,10 +29,10 @@ import (
 	media "github.com/nikhea/malawi-e-commerce-store/internal/media"
 	mediapublic "github.com/nikhea/malawi-e-commerce-store/internal/media/public"
 	orders "github.com/nikhea/malawi-e-commerce-store/internal/orders"
+	orderspublic "github.com/nikhea/malawi-e-commerce-store/internal/orders/public"
 	products "github.com/nikhea/malawi-e-commerce-store/internal/products"
 	users "github.com/nikhea/malawi-e-commerce-store/internal/users"
 	variants "github.com/nikhea/malawi-e-commerce-store/internal/variants"
-	"github.com/nikhea/malawi-e-commerce-store/pkg/events"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/mail"
 	pkgmedia "github.com/nikhea/malawi-e-commerce-store/pkg/media"
 	"github.com/riverqueue/river"
@@ -61,6 +59,16 @@ func main() {
 	}
 }
 
+// discardNotifier drops order-lifecycle fan-out. The worker's orders
+// service needs a notifier to construct, but this process originates no
+// user requests — mail for API-side checkouts is enqueued by the API's
+// own notifier, and expiry cancellations stay silent by design.
+type discardNotifier struct{}
+
+func (discardNotifier) OrderCreated(context.Context, orderspublic.Order)   {}
+func (discardNotifier) OrderPaid(context.Context, orderspublic.Order)      {}
+func (discardNotifier) OrderCancelled(context.Context, orderspublic.Order) {}
+
 func run(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error {
 	// Module services the worker needs. Same index.go Wire entry points
 	// as the API — assembly stays identical on both sides.
@@ -71,8 +79,11 @@ func run(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error {
 	cartSvc := cart.Wire(pool, productsSvc, usersSvc)
 	inventorySvc := inventory.Wire(pool)
 
-	bus := events.New()
-	ordersSvc := orders.Wire(pool, cartSvc, inventorySvc, bus)
+	// Worker needs no notifier: it WORKS the mail queue (send_mail jobs)
+	// rather than enqueueing. Expiry cancellations here stay silent —
+	// receipt/OTP mail originates from the API side that owns the user
+	// request. A discard notifier keeps orders constructible.
+	ordersSvc := orders.Wire(pool, cartSvc, inventorySvc, discardNotifier{})
 
 	// SMTP sender for the send_mail queue. Misconfigured mail does NOT
 	// stop the worker (jobs still process); sends just log failures.
@@ -122,9 +133,8 @@ func run(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error {
 			return err
 		})
 	river.AddWorker(workers, jobs.NewExpireReservationsWorker(inventorySvc, ordersSvc))
-	// The worker's bus is local-only (nothing publishes into this
-	// process); mail arrives as durable send_mail River jobs from the
-	// API's bridge. This registration is what actually sends them.
+	// send_mail delivery lives here. The API only enqueues (its notifier
+	// adapter); this registration is what actually sends.
 	river.AddWorker(workers, jobs.NewSendMailWorker(sender))
 
 	if err := riverClient.Start(ctx); err != nil {

@@ -15,13 +15,6 @@ const (
 	StatusCancelled = "cancelled"
 )
 
-// Domain events emitted by this module. Payload is always Order.
-const (
-	OrderCreated   = "orders.created"
-	OrderPaid      = "orders.paid"
-	OrderCancelled = "orders.cancelled"
-)
-
 // OrderLine is the legal record of one purchased line — snapshotted from
 // the cart at checkout, immune to later catalog or cart changes.
 type OrderLine struct {
@@ -50,7 +43,7 @@ type Order struct {
 // payments module (sync path until payment webhooks land).
 type Service interface {
 	// Checkout freezes the cart into a pending order, reserves stock,
-	// clears the cart, and publishes OrderCreated.
+	// clears the cart, and notifies OrderCreated.
 	Checkout(ctx context.Context, userID string) (Order, error)
 	// GetByID returns one order, owner-checked.
 	GetByID(ctx context.Context, userID, orderID string) (Order, error)
@@ -59,9 +52,9 @@ type Service interface {
 	GetByRef(ctx context.Context, orderID string) (Order, error)
 	// ListMine returns the caller's orders, newest first.
 	ListMine(ctx context.Context, userID string) ([]Order, error)
-	// Cancel releases stock and publishes OrderCancelled. Pending only.
+	// Cancel releases stock and notifies OrderCancelled. Pending only.
 	Cancel(ctx context.Context, userID, orderID string) (Order, error)
-	// MarkPaid confirms stock and publishes OrderPaid. For payments.
+	// MarkPaid confirms stock and notifies OrderPaid. For payments.
 	// Idempotent: paying twice succeeds (webhook retries demand it).
 	MarkPaid(ctx context.Context, orderRef string) (Order, error)
 	// CancelByRef releases stock for a ref (failed payments). Idempotent.

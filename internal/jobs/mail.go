@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/riverqueue/river"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/mail"
+	"github.com/riverqueue/river"
 )
 
 // SendMailArgs is one outbound email as a River job. Persisted in

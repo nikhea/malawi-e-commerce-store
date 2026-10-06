@@ -11,7 +11,6 @@ import (
 	"github.com/nikhea/malawi-e-commerce-store/internal/orders/public"
 	"github.com/nikhea/malawi-e-commerce-store/internal/orders/service"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
-	"github.com/nikhea/malawi-e-commerce-store/pkg/events"
 )
 
 // fakeRepo is an in-memory orders store with guarded transitions.
@@ -148,16 +147,31 @@ type fixture struct {
 	svc       public.Service
 	cart      *fakeCart
 	inventory *fakeInventory
-	published []string
+	notify    *fakeNotifier
+}
+
+// fakeNotifier records lifecycle fan-out instead of enqueueing mail.
+type fakeNotifier struct {
+	created   []string
+	paid      []string
+	cancelled []string
+}
+
+func (f *fakeNotifier) OrderCreated(_ context.Context, o public.Order) {
+	f.created = append(f.created, o.ID)
+}
+
+func (f *fakeNotifier) OrderPaid(_ context.Context, o public.Order) {
+	f.paid = append(f.paid, o.ID)
+}
+
+func (f *fakeNotifier) OrderCancelled(_ context.Context, o public.Order) {
+	f.cancelled = append(f.cancelled, o.ID)
 }
 
 func newFixture() *fixture {
-	fx := &fixture{cart: &fakeCart{}, inventory: &fakeInventory{}}
-	bus := events.New()
-	bus.Subscribe(public.OrderCreated, func(_ context.Context, e events.Event) { fx.published = append(fx.published, e.Name) })
-	bus.Subscribe(public.OrderPaid, func(_ context.Context, e events.Event) { fx.published = append(fx.published, e.Name) })
-	bus.Subscribe(public.OrderCancelled, func(_ context.Context, e events.Event) { fx.published = append(fx.published, e.Name) })
-	fx.svc = service.NewService(newFakeRepo(), fx.cart, fx.inventory, bus, service.Config{})
+	fx := &fixture{cart: &fakeCart{}, inventory: &fakeInventory{}, notify: &fakeNotifier{}}
+	fx.svc = service.NewService(newFakeRepo(), fx.cart, fx.inventory, fx.notify, service.Config{})
 	return fx
 }
 
@@ -176,8 +190,8 @@ func TestCheckout(t *testing.T) {
 		if len(fx.inventory.reserved) != 1 || !fx.cart.cleared {
 			t.Fatalf("side effects missing: %+v %+v", fx.inventory.reserved, fx.cart.cleared)
 		}
-		if len(fx.published) != 1 || fx.published[0] != public.OrderCreated {
-			t.Fatalf("events wrong: %v", fx.published)
+		if len(fx.notify.created) != 1 || fx.notify.created[0] != order.ID {
+			t.Fatalf("notify wrong: %+v", fx.notify.created)
 		}
 	})
 
@@ -225,8 +239,8 @@ func TestPayCancel(t *testing.T) {
 	if err != nil || paid.Status != public.StatusPaid {
 		t.Fatalf("pay: %v %+v", err, paid)
 	}
-	if len(fx.inventory.confirmed) != 1 || fx.published[len(fx.published)-1] != public.OrderPaid {
-		t.Fatalf("pay side effects wrong: %+v %v", fx.inventory.confirmed, fx.published)
+	if len(fx.inventory.confirmed) != 1 || len(fx.notify.paid) != 1 || fx.notify.paid[0] != order.ID {
+		t.Fatalf("pay side effects wrong: %+v %+v", fx.inventory.confirmed, fx.notify.paid)
 	}
 	// Repeat pay succeeds (idempotent).
 	if _, err := fx.svc.MarkPaid(ctx, order.ID); err != nil {

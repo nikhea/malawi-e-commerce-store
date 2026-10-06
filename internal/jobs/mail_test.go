@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/riverqueue/river"
 	"github.com/nikhea/malawi-e-commerce-store/internal/jobs"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/mail"
+	"github.com/riverqueue/river"
 )
 
 // fakeSender records deliveries; fails when told to.

@@ -11,13 +11,13 @@ Module path: `github.com/nikhea/malawi-e-commerce-store`. Go 1.27.1.
 ├── cmd/
 │   ├── api/            # HTTP entrypoint. main.go builds the Gin engine,
 │   │   └── main.go     # wires config→db→repositories→services→handlers→routes, serves :8080
-│   └── worker/         # Background entrypoint: works the River queue (media
-│                       # uploads), sweeps expired reservations every minute,
-│                       # subscribes to domain events (log-based notify v1).
-│                       # Run alongside the API in dev: `go run ./cmd/worker`.
-│                       # Expiry orchestration lives in internal/jobs/ so BOTH
-│                       # api and worker can schedule/work it (River elects
-│                       # one scheduler; the job is idempotent).
+│   └── worker/         # Background entrypoint: works the River queues
+│                       # (media_upload, send_mail, expiry sweep) and sends
+│                       # mail via pkg/mail. Run alongside the API in dev:
+│                       # `go run ./cmd/worker`. Job orchestration lives in
+│                       # internal/jobs/ so BOTH api and worker can
+│                       # schedule/work it (River elects one scheduler;
+│                       # jobs are idempotent).
 ├── internal/           # All business modules. NEVER import internal/* from outside the module
 │   │                   # except via that module's public/ package (see §3).
 │   ├── auth/           # Reference layout — the only fully-scaffolded module (all dirs still empty):
@@ -39,19 +39,23 @@ Module path: `github.com/nikhea/malawi-e-commerce-store`. Go 1.27.1.
 │   ├── variants/       # SKU-level data (size/color/price deltas). Owned by products conceptually,
 │   │                   # split out for SKU scale. products/public re-exports what others need.
 │   ├── inventory/      # Stock levels + reservations. orders reserves via inventory/public;
-│   │                   # payments confirms/cancels via events (see §4).
+│   │                   # payments confirms/cancels via direct calls (§4).
 │   ├── wishlist/       # User→product links. Depends on users/public + products/public.
 │   ├── cart/           # Cart lines. Depends on products/public (price/availability) for validation.
 │   ├── orders/         # Checkout + order state machine. Depends on cart, inventory, users publics;
-│   │                   # emits OrderCreated / OrderPaid / OrderCancelled events.
-│   ├── payments/       # Stripe intents, checkout sessions, webhook handling. Subscribes to
-│   │                   # OrderCreated; publishes PaymentSucceeded/PaymentFailed.
+│   │                   # notifies OrderCreated / OrderPaid / OrderCancelled.
+│   ├── payments/       # Stripe intents, checkout sessions, webhook handling. Settles via
+│   │                   # orders/public (MarkPaid/CancelByRef); notifies PaymentSucceeded/Failed.
 │   └── reviews/        # Product reviews/ratings. Depends on users/public + products/public.
 │                       # Writes never block the catalog read path.
 ├── pkg/                # Shared kernel. Domain-AGNOSTIC only. If it mentions products/orders/
 │   ├── middleware/     # users, it belongs in a module's public/, NOT here.
-│   └── response/       # Gin middleware (auth, logging, CORS) + standard JSON envelope.
-│                       # Future: pkg/apperr (coded errors), pkg/events (in-process bus).
+│   ├── response/       # Gin middleware (auth, logging, CORS) + standard JSON envelope.
+│   ├── apperr/         # Coded errors mapped to HTTP statuses.
+│   ├── events/         # DELETED — replaced by internal/notify + River (see §4).
+│   ├── mail/           # SMTP sender (text receipts, OTP, reset links).
+│   ├── slug/           # URL slugifier shared by catalog modules.
+│   └── media/          # Cloudinary uploader (domain-free file moves).
 ├── config/             # Env loading + typed Config struct (currently empty — build it here,
 │                       # one loader used by BOTH cmd/api and cmd/worker).
 ├── db/
@@ -91,12 +95,14 @@ top-down: `public/api.go` (contract first) → `service/` → `repository/` →
 - `public/api.go` exposes three things and nothing else:
   1. `type Service interface { ... }` — every cross-module call, `ctx` first arg;
   2. the request/response DTOs those methods need;
-  3. the domain events the module emits (e.g. `OrderCreated`).
+  3. the notifier ports the service needs (e.g. `orders` takes a
+     `Notifier` with `OrderCreated/Paid/Cancelled` — implemented by
+     `internal/notify`, faked in tests).
 - Each service asserts compliance at compile time:
   `var _ public.Service = (*service)(nil)`.
 - Dependency direction (no cycles): `users` ← everyone; `products` ←
   `cart, wishlist, reviews, orders`; `inventory` ← `orders`;
-  `orders` → `payments` (via events, §4). If A needs B and B needs A,
+  `orders` → `payments` (via notifier + direct calls, §4). If A needs B and B needs A,
   the shared concept moves down into the lower module's `public/`.
 
 ## 4. Communication patterns
@@ -106,10 +112,13 @@ top-down: `public/api.go` (contract first) → `service/` → `repository/` →
   products.Public.Service)` then `productsSvc.GetPrice(ctx, skuID)` during
   cart validation; `orders` calls `inventorySvc.Reserve(ctx, items)` inside
   the checkout transaction.
-- **Asynchronous (side effects):** publish to the in-process event bus
-  (`pkg/events`, to be built). `orders` publishes `OrderCreated`;
-  `payments` (charge), `inventory` (confirm reservation), and notification
-  senders subscribe. Subscribers return no values and never block checkout.
+- **Asynchronous (side effects):** call narrow notifier methods; the
+  `internal/notify` adapter enqueues durable River jobs (`send_mail`,
+  owned by `internal/jobs`). Example: `auth` calls
+  `mailer.SendVerification(...)`; the worker delivers it. Notifiers
+  return nothing and never block the request. Rule retired: the old
+  in-process bus (`pkg/events`, deleted) couldn't cross processes —
+  River is the only cross-process channel.
 - **HTTP surface:** `/health` → `200 {"status":"ok"}` (no auth, used by
   Air/docker checks). Versioned APIs live at `/api/v1/<module>` and are
   registered per-module via that module's `RegisterRoutes`.
@@ -119,13 +128,13 @@ top-down: `public/api.go` (contract first) → `service/` → `repository/` →
 ```
 Gin engine (cmd/api) → pkg/middleware (auth JWT, request-id, logging)
   → internal/<module>/routes.go → handler (bind dto, 4xx on bad input)
-  → service (rules, transaction, cross-module public.Service calls, publish events)
+  → service (rules, transaction, cross-module public.Service calls, notifier calls)
   → repository (SQL/Redis) → pkg/response envelope → JSON
 ```
 
-Worker lifecycle (target): `cmd/worker` boots same `config/` + `db/`,
-subscribes to `pkg/events` and Stripe webhook queue, runs jobs with
-structured logging. No HTTP server.
+Worker lifecycle: `cmd/worker` boots same `config/` + `db/`, works the
+River queues (`media_upload`, `send_mail`, expiry sweep), sends mail via
+`pkg/mail`. No HTTP server.
 
 ## 6. Environment
 
@@ -209,6 +218,7 @@ swag init -g cmd/api/main.go --parseInternal -o docs   # regenerate API docs
 - Worker + expiry sweep (`413e152`): `cmd/worker` runs media uploads, the cron expiry job, and log-based notify subscribers; `internal/jobs` shared so api + worker both schedule/work it; `ReleaseExpired` closes the abandoned-checkout loop.
 - Rate limiting (this change): Redis fixed-window limiter (atomic Lua), strict on auth (10/min/IP), burst shield on webhooks (120/min), fail-open on Redis outage, `RATE_LIMITED` → 429 with `Retry-After`.
 - Full auth (this change): SMTP mail via River `send_mail` jobs, OTP verification, password reset, rotating refresh tokens with reuse-theft response (`0013`). API→worker mail crosses processes through River, never the in-process bus.
+- Bus removal (this change): `pkg/events` deleted; services take narrow notifier interfaces (`Mailer`, order/payment `Notifier`), one `internal/notify` adapter enqueues River jobs. Narrow ports keep tests to recording fakes; `AttachOrders` documents the single wiring cycle.
 
 Rules for this section: one bullet per landed module, commit hash included,
 key decisions noted (they explain otherwise-surprising code). Keep it to

@@ -11,7 +11,6 @@ import (
 	"github.com/nikhea/malawi-e-commerce-store/internal/payments/public"
 	"github.com/nikhea/malawi-e-commerce-store/internal/payments/service"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
-	"github.com/nikhea/malawi-e-commerce-store/pkg/events"
 )
 
 // fakeRepo is an in-memory payments ledger.
@@ -134,20 +133,31 @@ func (f *fakeGateway) VerifyWebhook(payload []byte, sig, _ string) (gateway.Webh
 }
 
 type fixture struct {
-	svc       public.Service
-	repo      *fakeRepo
-	orders    *fakeOrders
-	gw        *fakeGateway
-	published []string
+	svc    public.Service
+	repo   *fakeRepo
+	orders *fakeOrders
+	gw     *fakeGateway
+	notify *fakeNotifier
+}
+
+// fakeNotifier records outcome fan-out instead of enqueueing mail.
+type fakeNotifier struct {
+	succeeded []string
+	failed    []string
+}
+
+func (f *fakeNotifier) PaymentSucceeded(_ context.Context, p public.Payment) {
+	f.succeeded = append(f.succeeded, p.StripeIntentID)
+}
+
+func (f *fakeNotifier) PaymentFailed(_ context.Context, p public.Payment) {
+	f.failed = append(f.failed, p.StripeIntentID)
 }
 
 func newFixture(verify func([]byte, string) (gateway.WebhookEvent, error)) *fixture {
-	fx := &fixture{repo: newFakeRepo(), orders: newFakeOrders(), gw: &fakeGateway{}}
+	fx := &fixture{repo: newFakeRepo(), orders: newFakeOrders(), gw: &fakeGateway{}, notify: &fakeNotifier{}}
 	fx.gw.verify = verify
-	bus := events.New()
-	bus.Subscribe(public.PaymentSucceeded, func(_ context.Context, e events.Event) { fx.published = append(fx.published, e.Name) })
-	bus.Subscribe(public.PaymentFailed, func(_ context.Context, e events.Event) { fx.published = append(fx.published, e.Name) })
-	fx.svc = service.NewService(fx.repo, fx.orders, fx.gw, bus, service.Config{WebhookSecret: "whsec", FXMWKPerUSD: 1700})
+	fx.svc = service.NewService(fx.repo, fx.orders, fx.gw, fx.notify, service.Config{WebhookSecret: "whsec", FXMWKPerUSD: 1700})
 	return fx
 }
 
@@ -217,8 +227,8 @@ func TestHandleWebhook(t *testing.T) {
 		if err := fx.svc.HandleWebhook(ctx, []byte("{}"), "sig"); err != nil {
 			t.Fatalf("webhook: %v", err)
 		}
-		if len(fx.orders.markPaid) != 1 || len(fx.published) != 1 || fx.published[0] != public.PaymentSucceeded {
-			t.Fatalf("settle wrong: %+v %v", fx.orders.markPaid, fx.published)
+		if len(fx.orders.markPaid) != 1 || len(fx.notify.succeeded) != 1 || fx.notify.succeeded[0] != "pi-test" {
+			t.Fatalf("settle wrong: %+v %+v", fx.orders.markPaid, fx.notify.succeeded)
 		}
 		// Repeat is idempotent.
 		if err := fx.svc.HandleWebhook(ctx, []byte("{}"), "sig"); err != nil {
@@ -234,8 +244,8 @@ func TestHandleWebhook(t *testing.T) {
 		if err := fx.svc.HandleWebhook(ctx, []byte("{}"), "sig"); err != nil {
 			t.Fatalf("webhook: %v", err)
 		}
-		if len(fx.orders.cancelled) != 1 || fx.published[0] != public.PaymentFailed {
-			t.Fatalf("cancel wrong: %+v %v", fx.orders.cancelled, fx.published)
+		if len(fx.orders.cancelled) != 1 || len(fx.notify.failed) != 1 || fx.notify.failed[0] != "pi-test" {
+			t.Fatalf("cancel wrong: %+v %+v", fx.orders.cancelled, fx.notify.failed)
 		}
 	})
 

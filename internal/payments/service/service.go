@@ -10,7 +10,6 @@ import (
 	"github.com/nikhea/malawi-e-commerce-store/internal/payments/model"
 	"github.com/nikhea/malawi-e-commerce-store/internal/payments/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
-	"github.com/nikhea/malawi-e-commerce-store/pkg/events"
 )
 
 var _ public.Service = (*service)(nil)
@@ -43,15 +42,22 @@ type service struct {
 	gw     gateway.Gateway
 	secret string
 	fxRate float64
-	bus    *events.Bus
+	notify Notifier
 }
 
-func NewService(repo Repository, orders orderspublic.Service, gw gateway.Gateway, bus *events.Bus, cfg Config) public.Service {
+// Notifier is the payment-outcome fan-out port. Production:
+// *notify.Service (durable River mail + logs). Tests: a recording fake.
+type Notifier interface {
+	PaymentSucceeded(ctx context.Context, p public.Payment)
+	PaymentFailed(ctx context.Context, p public.Payment)
+}
+
+func NewService(repo Repository, orders orderspublic.Service, gw gateway.Gateway, notify Notifier, cfg Config) public.Service {
 	rate := cfg.FXMWKPerUSD
 	if rate <= 0 {
 		rate = 1700
 	}
-	return &service{repo: repo, orders: orders, gw: gw, secret: cfg.WebhookSecret, fxRate: rate, bus: bus}
+	return &service{repo: repo, orders: orders, gw: gw, secret: cfg.WebhookSecret, fxRate: rate, notify: notify}
 }
 
 // toStripeCents converts MWK tambala to billable USD cents.
@@ -120,13 +126,13 @@ func (s *service) HandleWebhook(ctx context.Context, payload []byte, sigHeader s
 
 	switch evt.Type {
 	case "payment_intent.succeeded":
-		return s.settle(ctx, evt, public.StatusSucceeded, public.PaymentSucceeded,
+		return s.settle(ctx, evt, public.StatusSucceeded,
 			func(ctx context.Context, ref string) error {
 				_, err := s.orders.MarkPaid(ctx, ref)
 				return err
 			})
 	case "payment_intent.payment_failed", "payment_intent.canceled":
-		return s.settle(ctx, evt, public.StatusFailed, public.PaymentFailed,
+		return s.settle(ctx, evt, public.StatusFailed,
 			s.orders.CancelByRef)
 	default:
 		// Unknown kinds (refunds, disputes, future types): acknowledge,
@@ -137,7 +143,7 @@ func (s *service) HandleWebhook(ctx context.Context, payload []byte, sigHeader s
 
 // settle moves the ledger row and the order together. The order call is
 // idempotent, so Stripe retries converge instead of duplicating.
-func (s *service) settle(ctx context.Context, evt gateway.WebhookEvent, status, eventName string, move func(context.Context, string) error) error {
+func (s *service) settle(ctx context.Context, evt gateway.WebhookEvent, status string, move func(context.Context, string) error) error {
 	payment, err := s.repo.GetByIntent(ctx, evt.IntentID)
 	if err != nil {
 		if apperr.CodeOf(err) == apperr.CodeNotFound {
@@ -157,6 +163,11 @@ func (s *service) settle(ctx context.Context, evt gateway.WebhookEvent, status, 
 	if err != nil {
 		return err
 	}
-	s.bus.Publish(ctx, events.Event{Name: eventName, Payload: toPublic(updated)})
+	view := toPublic(updated)
+	if status == public.StatusSucceeded {
+		s.notify.PaymentSucceeded(ctx, view)
+	} else {
+		s.notify.PaymentFailed(ctx, view)
+	}
 	return nil
 }

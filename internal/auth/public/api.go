@@ -33,31 +33,6 @@ type TokenPair struct {
 	Role           string    `json:"role" example:"customer"`
 }
 
-// Events emitted by this module. The worker sends the emails.
-const (
-	// EmailVerificationRequested payload: VerificationMail.
-	EmailVerificationRequested = "auth.email_verification_requested"
-	// PasswordResetRequested payload: ResetMail.
-	PasswordResetRequested = "auth.password_reset_requested"
-)
-
-// VerificationMail carries an OTP to the worker's mail sender. The code
-// travels in-process only — the DB keeps just its hash.
-type VerificationMail struct {
-	UserID string
-	Email  string
-	Name   string
-	Code   string
-}
-
-// ResetMail carries a reset token to the mail sender (same secrecy rule).
-type ResetMail struct {
-	UserID string
-	Email  string
-	Name   string
-	Token  string
-}
-
 // RegisterInput carries a signup. Password is RAW here — hashed inside
 // the service, never stored raw anywhere.
 type RegisterInput struct {

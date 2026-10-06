@@ -37,12 +37,12 @@ func validRole(r public.Role) bool {
 
 func toPublic(u model.User) public.User {
 	return public.User{
-		ID:        u.ID,
-		Email:     u.Email,
-		Name:      u.Name,
-		Role:      public.Role(u.Role),
+		ID:            u.ID,
+		Email:         u.Email,
+		Name:          u.Name,
+		Role:          public.Role(u.Role),
 		EmailVerified: u.EmailVerified,
-		CreatedAt: u.CreatedAt,
+		CreatedAt:     u.CreatedAt,
 	}
 }
 

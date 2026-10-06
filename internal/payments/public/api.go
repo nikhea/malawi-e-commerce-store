@@ -16,12 +16,6 @@ const (
 	StatusCancelled = "cancelled"
 )
 
-// Domain events emitted by this module. Payload is always Payment.
-const (
-	PaymentSucceeded = "payments.succeeded"
-	PaymentFailed    = "payments.failed"
-)
-
 // Payment is the charge view. AmountCents is the CHARGED amount (USD
 // cents); OrderAmountCents preserves the source MWK tambala.
 type Payment struct {

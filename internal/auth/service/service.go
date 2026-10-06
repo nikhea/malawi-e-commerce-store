@@ -6,12 +6,11 @@ import (
 	"strings"
 	"time"
 
-	authpublic "github.com/nikhea/malawi-e-commerce-store/internal/auth/public"
 	"github.com/nikhea/malawi-e-commerce-store/internal/auth/model"
+	authpublic "github.com/nikhea/malawi-e-commerce-store/internal/auth/public"
 	"github.com/nikhea/malawi-e-commerce-store/internal/auth/utils"
 	userspublic "github.com/nikhea/malawi-e-commerce-store/internal/users/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
-	"github.com/nikhea/malawi-e-commerce-store/pkg/events"
 )
 
 var _ authpublic.Service = (*service)(nil)
@@ -43,14 +42,21 @@ type Config struct {
 type service struct {
 	users  userspublic.Service
 	repo   Repository
-	bus    *events.Bus
+	mailer Mailer
 	secret string
 	ttl    time.Duration
 	admins map[string]struct{}
 }
 
-func NewService(users userspublic.Service, repo Repository, bus *events.Bus, cfg Config) authpublic.Service {
-	return &service{users: users, repo: repo, bus: bus, secret: cfg.Secret, ttl: cfg.TTL, admins: cfg.AdminEmails}
+// Mailer is the OTP/reset delivery port. Production: *notify.Service
+// (durable River jobs). Tests: a recording fake.
+type Mailer interface {
+	SendVerification(ctx context.Context, userID, email, name, code string)
+	SendReset(ctx context.Context, userID, email, name, token string)
+}
+
+func NewService(users userspublic.Service, repo Repository, mailer Mailer, cfg Config) authpublic.Service {
+	return &service{users: users, repo: repo, mailer: mailer, secret: cfg.Secret, ttl: cfg.TTL, admins: cfg.AdminEmails}
 }
 
 func (s *service) roleFor(email string) userspublic.Role {
@@ -155,10 +161,7 @@ func (s *service) sendVerification(ctx context.Context, u userspublic.User) erro
 	if err := s.repo.UpsertVerification(ctx, u.ID, utils.HashSecret(code), time.Now().Add(utils.OTPExpiry)); err != nil {
 		return apperr.Internal(err)
 	}
-	s.bus.Publish(ctx, events.Event{
-		Name:    authpublic.EmailVerificationRequested,
-		Payload: authpublic.VerificationMail{UserID: u.ID, Email: u.Email, Name: u.Name, Code: code},
-	})
+	s.mailer.SendVerification(ctx, u.ID, u.Email, u.Name, code)
 	return nil
 }
 
@@ -205,10 +208,7 @@ func (s *service) RequestPasswordReset(ctx context.Context, email string) error 
 	if err != nil {
 		return err
 	}
-	s.bus.Publish(ctx, events.Event{
-		Name:    authpublic.PasswordResetRequested,
-		Payload: authpublic.ResetMail{UserID: u.ID, Email: u.Email, Name: full.Name, Token: token},
-	})
+	s.mailer.SendReset(ctx, u.ID, u.Email, full.Name, token)
 	return nil
 }
 

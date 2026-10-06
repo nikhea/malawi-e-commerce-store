@@ -10,7 +10,6 @@ import (
 	"github.com/nikhea/malawi-e-commerce-store/internal/orders/model"
 	"github.com/nikhea/malawi-e-commerce-store/internal/orders/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
-	"github.com/nikhea/malawi-e-commerce-store/pkg/events"
 )
 
 var _ public.Service = (*service)(nil)
@@ -31,20 +30,28 @@ type Config struct {
 	ReserveTTL time.Duration
 }
 
+// Notifier is the order-lifecycle fan-out port. Production:
+// *notify.Service (durable River mail + logs). Tests: a recording fake.
+type Notifier interface {
+	OrderCreated(ctx context.Context, o public.Order)
+	OrderPaid(ctx context.Context, o public.Order)
+	OrderCancelled(ctx context.Context, o public.Order)
+}
+
 type service struct {
 	repo      Repository
 	cart      cartpublic.Service
 	inventory inventorypublic.Service
-	bus       *events.Bus
+	notify    Notifier
 	ttl       time.Duration
 }
 
-func NewService(repo Repository, cart cartpublic.Service, inventory inventorypublic.Service, bus *events.Bus, cfg Config) public.Service {
+func NewService(repo Repository, cart cartpublic.Service, inventory inventorypublic.Service, notify Notifier, cfg Config) public.Service {
 	ttl := cfg.ReserveTTL
 	if ttl <= 0 {
 		ttl = 15 * time.Minute
 	}
-	return &service{repo: repo, cart: cart, inventory: inventory, bus: bus, ttl: ttl}
+	return &service{repo: repo, cart: cart, inventory: inventory, notify: notify, ttl: ttl}
 }
 
 func toPublic(o model.Order, items []model.Item) public.Order {
@@ -119,7 +126,7 @@ func (s *service) Checkout(ctx context.Context, userID string) (public.Order, er
 	if err != nil {
 		return public.Order{}, err
 	}
-	s.bus.Publish(ctx, events.Event{Name: public.OrderCreated, Payload: view})
+	s.notify.OrderCreated(ctx, view)
 	return view, nil
 }
 
@@ -202,7 +209,7 @@ func (s *service) cancelOrder(ctx context.Context, o model.Order) (public.Order,
 	if err != nil {
 		return public.Order{}, err
 	}
-	s.bus.Publish(ctx, events.Event{Name: public.OrderCancelled, Payload: view})
+	s.notify.OrderCancelled(ctx, view)
 	return view, nil
 }
 
@@ -239,7 +246,7 @@ func (s *service) MarkPaid(ctx context.Context, orderRef string) (public.Order, 
 	if err != nil {
 		return public.Order{}, err
 	}
-	s.bus.Publish(ctx, events.Event{Name: public.OrderPaid, Payload: view})
+	s.notify.OrderPaid(ctx, view)
 	return view, nil
 }
 

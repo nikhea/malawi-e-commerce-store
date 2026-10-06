@@ -42,8 +42,8 @@ func HashSecret(secret string) string {
 // OTPExpiry and ResetExpiry bound secret lifetimes. Short windows shrink
 // the replay surface if an inbox is compromised later.
 const (
-	OTPExpiry          = 15 * time.Minute
-	ResetExpiry        = 1 * time.Hour
-	RefreshExpiry      = 30 * 24 * time.Hour
-	MinPasswordLength  = 8
+	OTPExpiry         = 15 * time.Minute
+	ResetExpiry       = 1 * time.Hour
+	RefreshExpiry     = 30 * 24 * time.Hour
+	MinPasswordLength = 8
 )
