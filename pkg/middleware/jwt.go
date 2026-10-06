@@ -17,6 +17,11 @@ const userIDKey = "user_id"
 // role via SetRole (for RequireRole) and user id via UserIDOf (for /me
 // and future per-user scoping). It takes the auth PUBLIC interface, so
 // this package never imports auth/service, auth/utils, or any repository.
+//
+// CSRF note: tokens ride the Authorization header (never cookies), so
+// browsers never attach them cross-origin — this API is CSRF-immune by
+// construction. If cookie auth is ever added, pair it with SameSite +
+// anti-CSRF tokens and revisit this claim.
 func JWT(authSvc authpublic.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token, ok := strings.CutPrefix(c.GetHeader("Authorization"), "Bearer ")

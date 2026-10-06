@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -219,6 +220,10 @@ func newRouter(cfg config.Config) (*gin.Engine, error) {
 	}
 	r := gin.New()
 	r.Use(gin.Recovery(), middleware.RequestID(), middleware.Logger())
+	// CORS allowlist (storefront origin only) + security headers. Both
+	// global: preflights must answer before auth, headers on every reply.
+	r.Use(cors.New(middleware.CORSConfig(cfg.AppURL, cfg.FrontendURL)))
+	r.Use(middleware.SecureHeaders())
 	if err := r.SetTrustedProxies(nil); err != nil {
 		return nil, fmt.Errorf("trusted proxies: %w", err)
 	}

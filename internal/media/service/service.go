@@ -14,6 +14,7 @@ import (
 	mediapublic "github.com/nikhea/malawi-e-commerce-store/internal/media/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
 	pkgmedia "github.com/nikhea/malawi-e-commerce-store/pkg/media"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/ssrf"
 	"github.com/riverqueue/river"
 )
 
@@ -131,6 +132,11 @@ func (s *Service) source(ctx context.Context, args UploadArgs) (io.Reader, func(
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, args.SourceURL, nil)
 	if err != nil {
 		return nil, noop, fmt.Errorf("build fetch request: %w", err)
+	}
+	// SSRF: the URL may be attacker-influenced (future public upload
+	// paths). Deterministic failure → cancel, never retry.
+	if err := ssrf.ValidateURL(ctx, args.SourceURL); err != nil {
+		return nil, noop, river.JobCancel(err)
 	}
 	resp, err := s.http.Do(req)
 	if err != nil {

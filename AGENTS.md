@@ -218,7 +218,8 @@ swag init -g cmd/api/main.go --parseInternal -o docs   # regenerate API docs
 - Worker + expiry sweep (`413e152`): `cmd/worker` runs media uploads, the cron expiry job, and log-based notify subscribers; `internal/jobs` shared so api + worker both schedule/work it; `ReleaseExpired` closes the abandoned-checkout loop.
 - Rate limiting (this change): Redis fixed-window limiter (atomic Lua), strict on auth (10/min/IP), burst shield on webhooks (120/min), fail-open on Redis outage, `RATE_LIMITED` → 429 with `Retry-After`.
 - Full auth (this change): SMTP mail via River `send_mail` jobs, OTP verification, password reset, rotating refresh tokens with reuse-theft response (`0013`). API→worker mail crosses processes through River, never the in-process bus.
-- Bus removal (this change): `pkg/events` deleted; services take narrow notifier interfaces (`Mailer`, order/payment `Notifier`), one `internal/notify` adapter enqueues River jobs. Narrow ports keep tests to recording fakes; `AttachOrders` documents the single wiring cycle.
+- Bus removal (`4fe91d5`): `pkg/events` deleted; services take narrow notifier interfaces (`Mailer`, order/payment `Notifier`), one `internal/notify` adapter enqueues River jobs. Narrow ports keep tests to recording fakes; `AttachOrders` documents the single wiring cycle.
+- Web security (this change): CORS allowlist (`FRONTEND_URL`, credentials on, never `*`), secure headers (nosniff/DENY/CSP) on every reply, SSRF guard on server-side fetches (`pkg/ssrf`, private ranges denied), CSRF-immune by construction (header JWTs, no cookies).
 
 Rules for this section: one bullet per landed module, commit hash included,
 key decisions noted (they explain otherwise-surprising code). Keep it to

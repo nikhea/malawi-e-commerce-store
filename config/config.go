@@ -15,6 +15,10 @@ type Config struct {
 	AppPort string
 	AppURL  string
 
+	// FrontendURL is the storefront origin allowed by CORS. Single
+	// storefront = single origin (no wildcard — credentials are on).
+	FrontendURL string
+
 	// Env is "development" or "production". Production switches Gin to
 	// release mode (no debug logs/routes) — see wire.go newRouter.
 	Env string
@@ -67,6 +71,7 @@ func Load() (Config, error) {
 	cfg := Config{
 		AppPort:                envOr("APP_PORT", "8080"),
 		AppURL:                 envOr("APP_URL", "http://localhost:8080"),
+		FrontendURL:            envOr("FRONTEND_URL", "http://localhost:3000"),
 		Env:                    envOr("APP_ENV", "development"),
 		DatabaseURL:            os.Getenv("DATABASE_URL"),
 		RedisURL:               envOr("REDIS_URL", "redis://localhost:6379/0"),
