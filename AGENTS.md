@@ -205,8 +205,9 @@ swag init -g cmd/api/main.go --parseInternal -o docs   # regenerate API docs
 - Inventory (`8c8c1d9`): on-hand + reserved counters with CHECK guard, transactional reserve/release/confirm, idempotent settle, admin-only routes (`0007`).
 - Orders (`693c4db`): checkout freezing cart into pending orders, guarded pending→paid|cancelled transitions, crash-safe MarkPaid, `pkg/events` bus with OrderCreated/Paid/Cancelled (`0008`).
 - Payments (`ffad265`): Stripe intents with MWK→USD conversion, HMAC webhooks settling orders, idempotent retries, `PaymentSucceeded/Failed` events (`0009`).
-- Wishlist + reviews (this change): idempotent hearts with catalog snapshots (`0010`); one-review-per-user with author snapshots, SQL aggregates, owner isolation + admin moderation (`0011`, `0012`).
-- Worker + expiry sweep (this change): `cmd/worker` runs media uploads, the cron expiry job, and log-based notify subscribers; `internal/jobs` shared so api + worker both schedule/work it; `ReleaseExpired` closes the abandoned-checkout loop.
+- Wishlist + reviews (`40df44f`): idempotent hearts with catalog snapshots (`0010`); one-review-per-user with author snapshots, SQL aggregates, owner isolation + admin moderation (`0011`, `0012`).
+- Worker + expiry sweep (`413e152`): `cmd/worker` runs media uploads, the cron expiry job, and log-based notify subscribers; `internal/jobs` shared so api + worker both schedule/work it; `ReleaseExpired` closes the abandoned-checkout loop.
+- Rate limiting (this change): Redis fixed-window limiter (atomic Lua), strict on auth (10/min/IP), burst shield on webhooks (120/min), fail-open on Redis outage, `RATE_LIMITED` → 429 with `Retry-After`.
 
 Rules for this section: one bullet per landed module, commit hash included,
 key decisions noted (they explain otherwise-surprising code). Keep it to

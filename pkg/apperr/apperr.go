@@ -15,6 +15,7 @@ const (
 	CodeUnauthorized Code = "UNAUTHORIZED"
 	CodeForbidden    Code = "FORBIDDEN"
 	CodeConflict     Code = "CONFLICT"
+	CodeRateLimited  Code = "RATE_LIMITED"
 	CodeInternal     Code = "INTERNAL"
 )
 
@@ -40,6 +41,7 @@ func Validation(msg string) *Error   { return &Error{Code: CodeValidation, Messa
 func Unauthorized(msg string) *Error { return &Error{Code: CodeUnauthorized, Message: msg} }
 func Forbidden(msg string) *Error    { return &Error{Code: CodeForbidden, Message: msg} }
 func Conflict(msg string) *Error     { return &Error{Code: CodeConflict, Message: msg} }
+func RateLimited(msg string) *Error  { return &Error{Code: CodeRateLimited, Message: msg} }
 
 // Internal wraps an unexpected failure. err is kept for logs; only a
 // generic message reaches the client.
@@ -70,6 +72,8 @@ func StatusOf(err error) int {
 		return http.StatusForbidden
 	case CodeConflict:
 		return http.StatusConflict
+	case CodeRateLimited:
+		return http.StatusTooManyRequests
 	default:
 		return http.StatusInternalServerError
 	}

@@ -40,6 +40,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("wire app: %v", err)
 	}
+	if a.redisClient != nil {
+		defer a.redisClient.Close()
+	}
 
 	r, err := newRouter(cfg)
 	if err != nil {

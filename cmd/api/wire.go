@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nikhea/malawi-e-commerce-store/config"
+	"github.com/nikhea/malawi-e-commerce-store/db"
 	// Blank import: runs docs.init(), which registers the spec with the
 	// swag registry. Without it /swagger/doc.json 500s — and nothing at
 	// compile time warns you, since side-effect imports are invisible.
@@ -46,6 +47,7 @@ import (
 	"github.com/nikhea/malawi-e-commerce-store/pkg/events"
 	pkgmedia "github.com/nikhea/malawi-e-commerce-store/pkg/media"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/middleware"
+	"github.com/redis/go-redis/v9"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	swaggerfiles "github.com/swaggo/files"
@@ -69,6 +71,7 @@ type app struct {
 	authSvc       authpublic.Service
 	mediaSvc      *mediaservice.Service
 	riverClient   *river.Client[pgx.Tx]
+	redisClient   *redis.Client // nil when Redis is down: limiters detach
 }
 
 // wireApp assembles modules and infra in dependency order:
@@ -83,6 +86,14 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 	productsSvc := products.Wire(pool, categoriesSvc, variantsSvc)
 	cartSvc := cart.Wire(pool, productsSvc, usersSvc)
 	inventorySvc := inventory.Wire(pool)
+
+	// Redis backs rate limiting only. Fail-open by design: a dead Redis
+	// disables throttling (loudly) instead of taking the shop down.
+	redisClient, err := db.NewRedisClient(ctx, cfg.RedisURL, cfg.RedisHost, cfg.RedisPort, cfg.RedisDB, cfg.RedisPassword)
+	if err != nil {
+		log.Printf("WARNING: redis unavailable, rate limiting disabled: %v", err)
+		redisClient = nil
+	}
 
 	// In-process event bus: orders publishes, payments and notification
 	// senders will subscribe. No persistence — restart drops nothing
@@ -169,6 +180,7 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 		authSvc:       authSvc,
 		mediaSvc:      mediaSvc,
 		riverClient:   riverClient,
+		redisClient:   redisClient,
 	}, nil
 }
 
@@ -212,7 +224,15 @@ func registerRoutes(r *gin.Engine, a *app) {
 	// Open: register/login must NOT sit behind JWT. Catalog reads are
 	// open too — storefront browsing needs no login.
 	open := r.Group("/api/v1")
-	auth.RegisterRoutes(open, a.authSvc)
+	// Brute-force shield: 10 auth attempts/min/IP. Attached here (not in
+	// the module) because the policy belongs to the app, not the module.
+	authGroup := open.Group("/auth")
+	if a.redisClient != nil {
+		authGroup.Use(middleware.RateLimit(a.redisClient, middleware.RateLimitConfig{
+			Name: "auth", Limit: 10, Window: time.Minute,
+		}))
+	}
+	auth.RegisterRoutes(authGroup, a.authSvc)
 
 	// Protected: JWT runs first (sets role + user id), then module routes.
 	// RequireRole inside the admin groups enforces for real.
@@ -225,7 +245,15 @@ func registerRoutes(r *gin.Engine, a *app) {
 	cart.RegisterRoutes(protected, a.cartSvc)
 	inventory.RegisterRoutes(protected, a.inventorySvc)
 	orders.RegisterRoutes(protected, a.ordersSvc)
-	payments.RegisterRoutes(open, protected, a.paymentsSvc)
+	// Burst shield for Stripe retries: 120 webhook hits/min/IP. The HMAC
+	// stays the real authentication; this only absorbs floods.
+	webhooks := open.Group("/webhooks")
+	if a.redisClient != nil {
+		webhooks.Use(middleware.RateLimit(a.redisClient, middleware.RateLimitConfig{
+			Name: "webhooks", Limit: 120, Window: time.Minute,
+		}))
+	}
+	payments.RegisterRoutes(webhooks, protected, a.paymentsSvc)
 	wishlist.RegisterRoutes(protected, a.wishlistSvc)
 	reviews.RegisterRoutes(open, protected, a.reviewsSvc)
 

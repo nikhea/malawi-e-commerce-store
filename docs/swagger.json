@@ -2381,6 +2381,7 @@
                 "UNAUTHORIZED",
                 "FORBIDDEN",
                 "CONFLICT",
+                "RATE_LIMITED",
                 "INTERNAL"
             ],
             "x-enum-varnames": [
@@ -2389,6 +2390,7 @@
                 "CodeUnauthorized",
                 "CodeForbidden",
                 "CodeConflict",
+                "CodeRateLimited",
                 "CodeInternal"
             ]
         },

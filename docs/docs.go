@@ -2388,6 +2388,7 @@ const docTemplate = `{
                 "UNAUTHORIZED",
                 "FORBIDDEN",
                 "CONFLICT",
+                "RATE_LIMITED",
                 "INTERNAL"
             ],
             "x-enum-varnames": [
@@ -2396,6 +2397,7 @@ const docTemplate = `{
                 "CodeUnauthorized",
                 "CodeForbidden",
                 "CodeConflict",
+                "CodeRateLimited",
                 "CodeInternal"
             ]
         },
