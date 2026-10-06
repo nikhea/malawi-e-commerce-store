@@ -18,6 +18,8 @@ import (
 	_ "github.com/nikhea/malawi-e-commerce-store/docs"
 	auth "github.com/nikhea/malawi-e-commerce-store/internal/auth"
 	authpublic "github.com/nikhea/malawi-e-commerce-store/internal/auth/public"
+	cart "github.com/nikhea/malawi-e-commerce-store/internal/cart"
+	cartpublic "github.com/nikhea/malawi-e-commerce-store/internal/cart/public"
 	categories "github.com/nikhea/malawi-e-commerce-store/internal/categories"
 	categoriespublic "github.com/nikhea/malawi-e-commerce-store/internal/categories/public"
 	media "github.com/nikhea/malawi-e-commerce-store/internal/media"
@@ -45,6 +47,7 @@ type app struct {
 	categoriesSvc categoriespublic.Service
 	variantsSvc   variantspublic.Service
 	productsSvc   productspublic.Service
+	cartSvc       cartpublic.Service
 	authSvc       authpublic.Service
 	mediaSvc      *mediaservice.Service
 	riverClient   *river.Client[pgx.Tx]
@@ -60,6 +63,7 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 	categoriesSvc := categories.Wire(pool)
 	variantsSvc := variants.Wire(pool)
 	productsSvc := products.Wire(pool, categoriesSvc, variantsSvc)
+	cartSvc := cart.Wire(pool, productsSvc, usersSvc)
 
 	uploader, err := pkgmedia.NewCloudinaryUploader(pkgmedia.CloudinaryConfig{
 		CloudName: cfg.CloudName,
@@ -111,6 +115,7 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 		categoriesSvc: categoriesSvc,
 		variantsSvc:   variantsSvc,
 		productsSvc:   productsSvc,
+		cartSvc:       cartSvc,
 		authSvc:       authSvc,
 		mediaSvc:      mediaSvc,
 		riverClient:   riverClient,
@@ -167,6 +172,7 @@ func registerRoutes(r *gin.Engine, a *app) {
 	categories.RegisterRoutes(open, protected, a.categoriesSvc, a.mediaSvc)
 	variants.RegisterRoutes(open, protected, a.variantsSvc)
 	products.RegisterRoutes(open, protected, a.productsSvc, a.mediaSvc)
+	cart.RegisterRoutes(protected, a.cartSvc)
 
 	// Generated API docs (docs/ is committed; refresh with
 	// `swag init -g cmd/api/main.go --parseInternal -o docs`).

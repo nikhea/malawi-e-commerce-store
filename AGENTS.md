@@ -187,3 +187,17 @@ swag init -g cmd/api/main.go --parseInternal -o docs   # regenerate API docs
   with a placeholder in the same commit.
 - Commit only with all of `go build ./...`, `go vet ./...` green
   (and `go test ./...` once tests exist).
+
+## 10. Build progress (agents: update this section on every landed module)
+
+- Foundation (`aebaf92`): config loader, pgx pool, `pkg/apperr|response|middleware`, wired `main`, `0001_users`.
+- Users + admin roles (`a4229ef`): `users` CRUD, `role` flag + `RequireRole`, `0002_user_roles`, `ADMIN_EMAILS` bootstrap.
+- Auth + Swagger (`a6ed8c3`): bcrypt register, JWT login/middleware, `GetCredentials`, `/me`, committed `docs/`.
+- App assembly (`30465a6`): per-module `index.go` `Wire`, `cmd/api/wire.go`, hardened server (timeouts, trusted proxies, `APP_ENV`).
+- Categories + image pipeline (`30465a6`): slug taxonomy, public reads + admin writes, River queue + Cloudinary uploader with per-owner callbacks (`0003`, `0004`).
+- Products + variants (`9c538b0`): SPU + absolute-price SKUs, minor-unit money, `Detail` composition, `pkg/slug` shared, `0005`.
+- Cart (this change): one cart per user, catalog-validated adds with price snapshots, COALESCE-index line merge, JWT-only routes (`0006`).
+
+Rules for this section: one bullet per landed module, commit hash included,
+key decisions noted (they explain otherwise-surprising code). Keep it to
+bullets — design detail lives in each module's README.

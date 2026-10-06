@@ -16,6 +16,19 @@ definitions:
     - CodeForbidden
     - CodeConflict
     - CodeInternal
+  dto.AddItemRequest:
+    properties:
+      product_id:
+        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+        type: string
+      qty:
+        example: 2
+        type: integer
+      variant_id:
+        type: string
+    required:
+    - product_id
+    type: object
   dto.CreateCategoryRequest:
     properties:
       description:
@@ -101,6 +114,12 @@ definitions:
     - email
     - password
     type: object
+  dto.SetQtyRequest:
+    properties:
+      qty:
+        example: 3
+        type: integer
+    type: object
   dto.SetRoleRequest:
     properties:
       role:
@@ -148,6 +167,24 @@ definitions:
       price_cents:
         type: integer
     type: object
+  public.Cart:
+    properties:
+      currency:
+        example: MWK
+        type: string
+      id:
+        type: string
+      items:
+        items:
+          $ref: '#/definitions/public.Line'
+        type: array
+      subtotal_cents:
+        type: integer
+      updated_at:
+        type: string
+      user_id:
+        type: string
+    type: object
   public.Category:
     properties:
       created_at:
@@ -178,6 +215,33 @@ definitions:
         items:
           $ref: '#/definitions/public.VariantView'
         type: array
+    type: object
+  public.Line:
+    properties:
+      currency:
+        example: MWK
+        type: string
+      id:
+        type: string
+      line_total_cents:
+        example: 25000
+        type: integer
+      name:
+        example: Sunseed Cooking Oil 2L
+        type: string
+      product_id:
+        type: string
+      qty:
+        example: 2
+        type: integer
+      sku:
+        example: OIL-500-001
+        type: string
+      unit_price_cents:
+        example: 12500
+        type: integer
+      variant_id:
+        type: string
     type: object
   public.Product:
     properties:
@@ -822,6 +886,148 @@ paths:
       summary: Register a new account
       tags:
       - auth
+  /cart:
+    delete:
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Empty the cart
+      tags:
+      - cart
+    get:
+      description: Active cart with snapshot prices and computed subtotal.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.Cart'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get my cart
+      tags:
+      - cart
+  /cart/items:
+    post:
+      consumes:
+      - application/json
+      description: Validates against the catalog and snapshots the price.
+      parameters:
+      - description: Line
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AddItemRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.Cart'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Add an item
+      tags:
+      - cart
+  /cart/items/{id}:
+    delete:
+      parameters:
+      - description: Item ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.Cart'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Remove a line
+      tags:
+      - cart
+    patch:
+      consumes:
+      - application/json
+      description: Qty 0 removes the line.
+      parameters:
+      - description: Item ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Qty
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.SetQtyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.Cart'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Change a line's quantity
+      tags:
+      - cart
   /categories:
     get:
       description: Public storefront taxonomy, flat and ordered by name.
