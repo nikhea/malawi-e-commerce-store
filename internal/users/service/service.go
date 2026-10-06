@@ -94,6 +94,23 @@ func (s *service) GetByEmail(ctx context.Context, email string) (public.User, er
 	return toPublic(u), nil
 }
 
+func (s *service) GetCredentials(ctx context.Context, email string) (public.Credentials, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return public.Credentials{}, apperr.Validation("email is required")
+	}
+	u, err := s.repo.GetByEmail(ctx, email)
+	if err != nil {
+		return public.Credentials{}, err
+	}
+	return public.Credentials{
+		UserID:       u.ID,
+		Email:        u.Email,
+		Role:         public.Role(u.Role),
+		PasswordHash: u.PasswordHash,
+	}, nil
+}
+
 func (s *service) SetRole(ctx context.Context, id string, role public.Role) (public.User, error) {
 	if strings.TrimSpace(id) == "" {
 		return public.User{}, apperr.Validation("id is required")

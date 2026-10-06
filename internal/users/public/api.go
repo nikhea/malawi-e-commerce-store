@@ -17,13 +17,13 @@ const (
 	RoleCustomer Role = "customer"
 )
 
-// User is the cross-module view of an account. PasswordHash NEVER leaves
-// this module — not in this struct, not in any method signature here.
+// User is the cross-module view of an account. It never carries the
+// password hash — only Credentials does, and only to the auth module.
 type User struct {
-	ID        string    `json:"id"`
-	Email     string    `json:"email"`
-	Name      string    `json:"name"`
-	Role      Role      `json:"role"`
+	ID        string    `json:"id" example:"3fa85f64-5717-4562-b3fc-2c963f66afa6"`
+	Email     string    `json:"email" example:"shop@malawi.mw"`
+	Name      string    `json:"name" example:"Aisha Banda"`
+	Role      Role      `json:"role" example:"customer"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -37,11 +37,24 @@ type CreateUserInput struct {
 	Role         Role
 }
 
+// Credentials is the login-verification view: the ONLY shape that carries
+// the password hash across the module boundary, and only to the auth
+// module. No JSON tags on purpose — this must never be serialized.
+type Credentials struct {
+	UserID       string
+	Email        string
+	Role         Role
+	PasswordHash string
+}
+
 // Service is the users capability surface. Every method takes ctx first.
 type Service interface {
 	Create(ctx context.Context, in CreateUserInput) (User, error)
 	GetByID(ctx context.Context, id string) (User, error)
 	GetByEmail(ctx context.Context, email string) (User, error)
+	// GetCredentials returns the login-verification view for auth's
+	// password check. Same not-found semantics as GetByEmail.
+	GetCredentials(ctx context.Context, email string) (Credentials, error)
 	// SetRole changes an account's access level. Admin-only: enforced by
 	// the RequireRole middleware on /admin routes, not by this package.
 	SetRole(ctx context.Context, id string, role Role) (User, error)

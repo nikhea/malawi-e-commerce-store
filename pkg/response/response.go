@@ -13,13 +13,17 @@ type envelope struct {
 	Data any `json:"data,omitempty"`
 }
 
-type errorBody struct {
-	Code    apperr.Code `json:"code"`
-	Message string      `json:"message"`
+// ErrorDetail is one machine-readable failure. Exported so swag can
+// reference it in generated API docs.
+type ErrorDetail struct {
+	Code    apperr.Code `json:"code" example:"NOT_FOUND"`
+	Message string      `json:"message" example:"user not found"`
 }
 
-type errorEnvelope struct {
-	Error errorBody `json:"error"`
+// ErrorResponse is the failure envelope. Exported so swag can reference
+// it in generated API docs.
+type ErrorResponse struct {
+	Error ErrorDetail `json:"error"`
 }
 
 // OK writes 200 with {"data": data}.
@@ -47,7 +51,7 @@ func Error(c *gin.Context, err error) {
 	if errors.As(err, &e) && e.Message != "" && code != apperr.CodeInternal {
 		msg = e.Message
 	}
-	c.JSON(apperr.StatusOf(err), errorEnvelope{
-		Error: errorBody{Code: code, Message: msg},
+	c.JSON(apperr.StatusOf(err), ErrorResponse{
+		Error: ErrorDetail{Code: code, Message: msg},
 	})
 }

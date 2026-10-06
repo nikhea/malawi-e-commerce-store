@@ -1,0 +1,280 @@
+basePath: /api/v1
+definitions:
+  apperr.Code:
+    enum:
+    - NOT_FOUND
+    - VALIDATION_ERROR
+    - UNAUTHORIZED
+    - FORBIDDEN
+    - CONFLICT
+    - INTERNAL
+    type: string
+    x-enum-varnames:
+    - CodeNotFound
+    - CodeValidation
+    - CodeUnauthorized
+    - CodeForbidden
+    - CodeConflict
+    - CodeInternal
+  dto.LoginRequest:
+    properties:
+      email:
+        example: shop@malawi.mw
+        type: string
+      password:
+        example: hunter2-secure
+        type: string
+    required:
+    - email
+    - password
+    type: object
+  dto.RegisterRequest:
+    properties:
+      email:
+        example: shop@malawi.mw
+        type: string
+      name:
+        example: Aisha Banda
+        type: string
+      password:
+        example: hunter2-secure
+        type: string
+    required:
+    - email
+    - password
+    type: object
+  dto.SetRoleRequest:
+    properties:
+      role:
+        allOf:
+        - $ref: '#/definitions/public.Role'
+        example: admin
+    required:
+    - role
+    type: object
+  public.Role:
+    enum:
+    - admin
+    - customer
+    type: string
+    x-enum-varnames:
+    - RoleAdmin
+    - RoleCustomer
+  public.TokenPair:
+    properties:
+      email:
+        example: shop@malawi.mw
+        type: string
+      expires_at:
+        type: string
+      name:
+        example: Aisha Banda
+        type: string
+      role:
+        example: customer
+        type: string
+      token:
+        example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        type: string
+      user_id:
+        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+        type: string
+    type: object
+  public.User:
+    properties:
+      created_at:
+        type: string
+      email:
+        example: shop@malawi.mw
+        type: string
+      id:
+        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+        type: string
+      name:
+        example: Aisha Banda
+        type: string
+      role:
+        allOf:
+        - $ref: '#/definitions/public.Role'
+        example: customer
+    type: object
+  response.ErrorDetail:
+    properties:
+      code:
+        allOf:
+        - $ref: '#/definitions/apperr.Code'
+        example: NOT_FOUND
+      message:
+        example: user not found
+        type: string
+    type: object
+  response.ErrorResponse:
+    properties:
+      error:
+        $ref: '#/definitions/response.ErrorDetail'
+    type: object
+info:
+  contact: {}
+  description: Single-storefront e-commerce API (users, catalog, cart, orders, payments).
+  title: Malawi E-Commerce Store API
+  version: "1.0"
+paths:
+  /admin/users/{id}/role:
+    patch:
+      consumes:
+      - application/json
+      description: Single-storefront admin op. Requires the admin role.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: New role
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.SetRoleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.User'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Change a user's role (admin)
+      tags:
+      - admin
+  /auth/login:
+    post:
+      consumes:
+      - application/json
+      description: Verifies credentials and returns a JWT. Errors stay vague on purpose.
+      parameters:
+      - description: Credentials
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.TokenPair'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      summary: Log in
+      tags:
+      - auth
+  /auth/register:
+    post:
+      consumes:
+      - application/json
+      description: Creates the account (customer by default, admin for ADMIN_EMAILS)
+        and returns a JWT.
+      parameters:
+      - description: Signup
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.RegisterRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/public.TokenPair'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      summary: Register a new account
+      tags:
+      - auth
+  /users/{id}:
+    get:
+      description: Returns one account wrapped in the standard {"data"} envelope.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.User'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      summary: Get user by ID
+      tags:
+      - users
+  /users/me:
+    get:
+      description: Reads identity from the JWT (no id parameter, can't spoof others).
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.User'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get the caller's own account
+      tags:
+      - users
+securityDefinitions:
+  BearerAuth:
+    description: JWT. Prefix with "Bearer ".
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

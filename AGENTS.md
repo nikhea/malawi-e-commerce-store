@@ -150,6 +150,8 @@ go test ./...                    # all module tests (per-module: go test ./inter
 go test ./internal/cart/...      # focused module test
 go mod tidy                      # after adding/removing imports
 redis-cli -h localhost -p 6379 ping   # expect PONG (local redis:7 container)
+swag init -g cmd/api/main.go --parseInternal -o docs   # regenerate API docs
+                                     # after changing handler annotations; docs/ is committed
 ```
 
 ## 8. Conventions for agents

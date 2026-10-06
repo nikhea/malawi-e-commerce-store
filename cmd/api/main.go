@@ -6,17 +6,32 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/nikhea/malawi-e-commerce-store/config"
 	"github.com/nikhea/malawi-e-commerce-store/db"
+	_ "github.com/nikhea/malawi-e-commerce-store/docs"
+	auth "github.com/nikhea/malawi-e-commerce-store/internal/auth"
+	authservice "github.com/nikhea/malawi-e-commerce-store/internal/auth/service"
 	users "github.com/nikhea/malawi-e-commerce-store/internal/users"
 	"github.com/nikhea/malawi-e-commerce-store/internal/users/repository"
 	userservice "github.com/nikhea/malawi-e-commerce-store/internal/users/service"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/middleware"
+	swaggerfiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 )
+
+// @title Malawi E-Commerce Store API
+// @version 1.0
+// @description Single-storefront e-commerce API (users, catalog, cart, orders, payments).
+// @BasePath /api/v1
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description JWT. Prefix with "Bearer ".
 
 func main() {
 	cfg, err := config.Load()
@@ -35,6 +50,17 @@ func main() {
 
 	usersSvc := userservice.NewService(repository.NewPostgres(pool))
 
+	admins := make(map[string]struct{}, len(cfg.AdminEmails))
+	for _, e := range cfg.AdminEmails {
+		// Lowercased: service looks up the already-lowercased email.
+		admins[strings.ToLower(strings.TrimSpace(e))] = struct{}{}
+	}
+	authSvc := authservice.NewService(usersSvc, authservice.Config{
+		Secret:      cfg.JWTSecret,
+		TTL:         time.Duration(cfg.JWTTTLHours) * time.Hour,
+		AdminEmails: admins,
+	})
+
 	r := gin.New()
 	r.Use(gin.Recovery(), middleware.RequestID(), middleware.Logger())
 
@@ -44,7 +70,19 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	users.RegisterRoutes(r.Group("/api/v1"), usersSvc)
+	// Open: register/login must NOT sit behind JWT.
+	open := r.Group("/api/v1")
+	auth.RegisterRoutes(open, authSvc)
+
+	// Protected: JWT runs first (sets role + user id), then module routes.
+	// RequireRole inside users' admin group now enforces for real.
+	protected := r.Group("/api/v1")
+	protected.Use(middleware.JWT(authSvc))
+	users.RegisterRoutes(protected, usersSvc)
+
+	// Generated API docs (docs/ is committed; refresh with
+	// `swag init -g cmd/api/main.go --parseInternal -o docs`).
+	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerfiles.Handler))
 
 	srv := &http.Server{Addr: cfg.Addr(), Handler: r}
 
