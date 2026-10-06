@@ -36,6 +36,12 @@ func Created(c *gin.Context, data any) {
 	c.JSON(http.StatusCreated, envelope{Data: data})
 }
 
+// Accepted writes 202 with {"data": data}. For async work (River jobs):
+// the request is valid and queued, the outcome comes later.
+func Accepted(c *gin.Context, data any) {
+	c.JSON(http.StatusAccepted, envelope{Data: data})
+}
+
 // NoContent writes 204 with an empty body.
 func NoContent(c *gin.Context) {
 	c.Status(http.StatusNoContent)

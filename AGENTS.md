@@ -69,6 +69,7 @@ Module path: `github.com/nikhea/malawi-e-commerce-store`. Go 1.27.1.
 | `service/`   | `service.go`                         | Business logic, transactions, calls to other modules' `public.Service` | Gin, SQL strings |
 | `handler/`   | `handler.go`                         | `c.ShouldBindJSON`, status codes, `pkg/response` envelope | Business logic, DB calls       |
 | `routes.go`  | package `<module>`                   | `RegisterRoutes(g *gin.RouterGroup, svc public.Service)` — route table only | Logic |
+| `index.go`   | package `<module>`                   | `Wire(...)` — the module's single entry point: builds repository → service (and worker registration for media) so `cmd/*` never assembles layers by hand | Logic, routes |
 | `public/`    | `api.go`                             | `Service` interface + method DTOs + event names the module emits | Implementations |
 | `utils/`     | helpers                              | Private pure functions for this module              | Cross-module imports                      |
 | `test/`      | `service_test.go`                    | Table-driven tests with fakes for repos and sibling `public.Service` | Real DB |

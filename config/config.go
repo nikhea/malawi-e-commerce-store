@@ -15,6 +15,10 @@ type Config struct {
 	AppPort string
 	AppURL  string
 
+	// Env is "development" or "production". Production switches Gin to
+	// release mode (no debug logs/routes) — see wire.go newRouter.
+	Env string
+
 	DatabaseURL string
 
 	RedisURL      string
@@ -58,6 +62,7 @@ func Load() (Config, error) {
 	cfg := Config{
 		AppPort:                envOr("APP_PORT", "8080"),
 		AppURL:                 envOr("APP_URL", "http://localhost:8080"),
+		Env:                    envOr("APP_ENV", "development"),
 		DatabaseURL:            os.Getenv("DATABASE_URL"),
 		RedisURL:               envOr("REDIS_URL", "redis://localhost:6379/0"),
 		RedisHost:              envOr("REDIS_HOST", "localhost"),

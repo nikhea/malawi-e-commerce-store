@@ -16,6 +16,25 @@ definitions:
     - CodeForbidden
     - CodeConflict
     - CodeInternal
+  dto.CreateCategoryRequest:
+    properties:
+      description:
+        example: Everyday essentials
+        type: string
+      image_url:
+        example: https://…/oil.jpg
+        type: string
+      name:
+        example: Cooking Oil
+        type: string
+      parent_id:
+        type: string
+      slug:
+        example: cooking-oil
+        type: string
+    required:
+    - name
+    type: object
   dto.LoginRequest:
     properties:
       email:
@@ -51,6 +70,40 @@ definitions:
         example: admin
     required:
     - role
+    type: object
+  dto.UpdateCategoryRequest:
+    properties:
+      clear_parent:
+        type: boolean
+      description:
+        type: string
+      name:
+        example: Cooking Oil
+        type: string
+      parent_id:
+        type: string
+    type: object
+  public.Category:
+    properties:
+      created_at:
+        type: string
+      description:
+        example: Everyday essentials
+        type: string
+      id:
+        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+        type: string
+      image_url:
+        example: https://res.cloudinary.com/…/oil.jpg
+        type: string
+      name:
+        example: Cooking Oil
+        type: string
+      parent_id:
+        type: string
+      slug:
+        example: cooking-oil
+        type: string
     type: object
   public.Role:
     enum:
@@ -119,6 +172,169 @@ info:
   title: Malawi E-Commerce Store API
   version: "1.0"
 paths:
+  /admin/categories:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Category
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateCategoryRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/public.Category'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create a category (admin)
+      tags:
+      - admin
+  /admin/categories/{id}:
+    delete:
+      description: Children become roots (SET NULL), they are not deleted.
+      parameters:
+      - description: Category ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete a category (admin)
+      tags:
+      - admin
+    patch:
+      consumes:
+      - application/json
+      description: Slug is immutable. Pass clear_parent to detach to root.
+      parameters:
+      - description: Category ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Fields
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateCategoryRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.Category'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update a category (admin)
+      tags:
+      - admin
+  /admin/categories/{id}/image:
+    post:
+      consumes:
+      - multipart/form-data
+      description: |-
+        Multipart upload. Queued in River, processed to Cloudinary
+        async — answers 202 immediately, image appears once the
+        worker finishes. Omit the file entirely if no image.
+      parameters:
+      - description: Category ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Image (max 10 MiB)
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Upload a category image (admin)
+      tags:
+      - admin
   /admin/users/{id}/role:
     patch:
       consumes:
@@ -225,6 +441,66 @@ paths:
       summary: Register a new account
       tags:
       - auth
+  /categories:
+    get:
+      description: Public storefront taxonomy, flat and ordered by name.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/public.Category'
+            type: array
+      summary: List categories
+      tags:
+      - categories
+  /categories/{id}:
+    get:
+      parameters:
+      - description: Category ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.Category'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      summary: Get category by ID
+      tags:
+      - categories
+  /categories/slug/{slug}:
+    get:
+      description: Pretty-URL lookup used by the storefront.
+      parameters:
+      - description: Category slug
+        in: path
+        name: slug
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.Category'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      summary: Get category by slug
+      tags:
+      - categories
   /users/{id}:
     get:
       description: Returns one account wrapped in the standard {"data"} envelope.
