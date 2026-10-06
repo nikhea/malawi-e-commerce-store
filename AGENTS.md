@@ -169,6 +169,27 @@ swag init -g cmd/api/main.go --parseInternal -o docs   # regenerate API docs
                                      # after changing handler annotations; docs/ is committed
 ```
 
+## 7b. Docker (multistage: dev, staging, production)
+
+```bash
+docker build --target dev -t malawi-store:dev .          # Air live reload (804MB, toolchain)
+docker build --target staging -t malawi-store:staging .  # prod-shaped, APP_ENV=staging
+docker build --target production -t malawi-store:prod .  # hardened: 77MB, non-root, healthcheck
+docker run --rm -v .:/app -p 8080:8080 --env-file .env malawi-store:dev        # dev loop
+docker run -d -p 8080:8080 --env-file .env malawi-store:prod                  # API
+docker run -d --no-healthcheck --entrypoint /app/worker --env-file .env malawi-store:prod  # worker
+```
+
+Notes: `staging`/`production` share one runtime (differ only in
+`APP_ENV`); both default to the API — override the entrypoint for the
+worker (with `--no-healthcheck`, since `/health` is API-only). Linux
+containers reaching host services use
+`--add-host=host.docker.internal:host-gateway`. Migrations
+(`db/migrations/*.sql` + `river migrate-up`) run OUTSIDE the image (CI
+migrate step); the image ships the SQL under `/app/db/migrations`.
+Never bake `.env` in — always `--env-file` at run time (`.dockerignore`
+enforces this at build time).
+
 ## 8. Conventions for agents
 
 - `ctx context.Context` is always the first parameter of service/repository
@@ -220,7 +241,8 @@ swag init -g cmd/api/main.go --parseInternal -o docs   # regenerate API docs
 - Full auth (this change): SMTP mail via River `send_mail` jobs, OTP verification, password reset, rotating refresh tokens with reuse-theft response (`0013`). API→worker mail crosses processes through River, never the in-process bus.
 - Bus removal (`4fe91d5`): `pkg/events` deleted; services take narrow notifier interfaces (`Mailer`, order/payment `Notifier`), one `internal/notify` adapter enqueues River jobs. Narrow ports keep tests to recording fakes; `AttachOrders` documents the single wiring cycle.
 - Web security (`f5cb286`): CORS allowlist (`FRONTEND_URL`, credentials on, never `*`), secure headers (nosniff/DENY/CSP) on every reply, SSRF guard on server-side fetches (`pkg/ssrf`, private ranges denied), CSRF-immune by construction (header JWTs, no cookies).
-- Docs + auth tolerance (this change): Scalar dark reference at `/docs` (CDN, offline fallback is `/swagger`); JWT accepts bare tokens (Swagger UI sends no prefix).
+- Docs + auth tolerance (`4c9d8ab`): Scalar dark reference at `/docs` (CDN, offline fallback is `/swagger`); JWT accepts bare tokens (Swagger UI sends no prefix).
+- Docker (this change): multistage `dev/staging/production` (Air loop, 77MB hardened runtime, non-root + healthcheck); worker via entrypoint override; migrations stay outside the image.
 
 Rules for this section: one bullet per landed module, commit hash included,
 key decisions noted (they explain otherwise-surprising code). Keep it to
