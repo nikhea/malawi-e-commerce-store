@@ -3584,7 +3584,7 @@ const docTemplate = `{
     },
     "securityDefinitions": {
         "BearerAuth": {
-            "description": "JWT. Prefix with \"Bearer \".",
+            "description": "JWT — paste with or without the \"Bearer\" prefix.",
             "type": "apiKey",
             "name": "Authorization",
             "in": "header"
