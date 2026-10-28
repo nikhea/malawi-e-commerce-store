@@ -1,5 +1,5 @@
 import type { Requester } from "../http";
-import type { Role, SetRoleInput, User } from "../types";
+import type { ListUsersParams, Role, SetRoleInput, User, UserListResponse } from "../types";
 
 /**
  * /api/v1/users — JWT required. `get` is readable by any authenticated user;
@@ -18,6 +18,19 @@ export class UsersApi {
 
   adminGet(id: string): Promise<User> {
     return this.request("GET", `/admin/users/${enc(id)}`);
+  }
+
+  /**
+   * Admin user directory without envelope metadata. Same filters and
+   * paging as `adminListPage`.
+   */
+  adminList(params?: ListUsersParams): Promise<User[]> {
+    return this.request("GET", "/admin/users", { query: params });
+  }
+
+  /** Admin user directory plus pagination counters. */
+  adminListPage(params?: ListUsersParams): Promise<UserListResponse> {
+    return this.request("GET", "/admin/users", { query: params, raw: true });
   }
 
   adminSetRole(id: string, input: SetRoleInput): Promise<User> {

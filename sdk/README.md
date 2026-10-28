@@ -116,6 +116,11 @@ store.inventory.setStock({ product_id, qty: 40 });
 const form = new FormData();
 form.append("file", file); // ≤ 10 MiB
 await store.products.adminUploadImage(productId, form); // 202, processed async via Cloudinary
+
+// Admin user directory: filters + pagination
+const customers = await store.users.adminList({ role: "customer", q: "aisha", sort: "newest" });
+const usersPage = await store.users.adminListPage({ email_verified: false, page: 1, limit: 50 });
+usersPage.meta.total; // matching accounts
 ```
 
 ### Errors

@@ -74,6 +74,32 @@ export type User = {
 
 export type SetRoleInput = { role: Role };
 
+export type UserSort =
+  | "newest"
+  | "oldest"
+  | "name_asc"
+  | "name_desc"
+  | "email_asc"
+  | "email_desc";
+
+/** Admin user directory filters. */
+export type ListUsersParams = {
+  /** Case-insensitive substring over email or name. */
+  q?: string;
+  role?: Role;
+  email_verified?: boolean;
+  /** RFC3339 timestamp or YYYY-MM-DD. */
+  created_after?: string;
+  created_before?: string;
+  sort?: UserSort;
+  /** 1-based page. Wins over `offset` when both are sent. */
+  page?: number;
+  limit?: number;
+  offset?: number;
+};
+
+export type UserListResponse = Paginated<User>;
+
 // ---------------------------------------------------------------------------
 // categories — /api/v1/categories
 // ---------------------------------------------------------------------------
