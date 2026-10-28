@@ -188,6 +188,9 @@ export type VariantView = {
   sku: string;
   price_cents: number;
   is_active: boolean;
+  /** Sellable units: on-hand minus active reservations. */
+  available: number;
+  in_stock: boolean;
 };
 
 /** Returned by GET /products/:id and GET /products/slug/:slug. */
@@ -221,6 +224,9 @@ export type Variant = {
   sku: string;
   price_cents: number;
   is_active: boolean;
+  /** Sellable units: on-hand minus active reservations. */
+  available: number;
+  in_stock: boolean;
   created_at: string;
 };
 

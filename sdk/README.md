@@ -85,6 +85,10 @@ const categories = await store.categories.listPage({
 `page` wins over `offset` when both are sent. The API defaults to 20 rows and
 caps a page at 100.
 
+Every variant (both `/products/:id` detail and `/products/:id/variants`) now
+carries `available` (on-hand minus reservations) and `in_stock`, so size
+pickers can disable sold-out options without extra calls.
+
 ### Prices are minor units (MWK tambala)
 
 `12500` = **K125.00**. Helpers included:
