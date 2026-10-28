@@ -27,6 +27,8 @@ type UpdateProductRequest struct {
 // ListProductsQuery binds the storefront catalog filters. Dates accept
 // RFC3339 or YYYY-MM-DD; page wins over offset when both are sent.
 type ListProductsQuery struct {
+	// Q is full-text search across name, description and slug. Word
+	// prefixes match; substring search is the fallback when FTS misses.
 	Q             string   `form:"q"`
 	CategoryID    *string  `form:"category_id"`
 	CategorySlug  *string  `form:"category_slug"`

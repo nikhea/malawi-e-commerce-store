@@ -165,11 +165,16 @@ export type ProductSort =
   | "newest"
   | "oldest"
   | "rating_asc"
-  | "rating_desc";
+  | "rating_desc"
+  | "relevance";
 
 /** Prices are USD cents (12500 = $125.00). */
 export type ListProductsParams = {
-  /** Case-insensitive substring over name, description and slug. */
+  /**
+   * Full-text search over name, description and slug. Word prefixes match
+   * ("cook" finds "cooking"); the API falls back to substring search when
+   * full-text finds nothing.
+   */
   q?: string;
   category_id?: string;
   category_slug?: string;

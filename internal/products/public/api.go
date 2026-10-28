@@ -71,9 +71,11 @@ type UpdateProductInput struct {
 }
 
 // ListFilter scopes the catalog listing. Zero value = active only,
-// first page, name order.
+// first page, name order (relevance when Query is set).
 type ListFilter struct {
-	// Query matches name, description or slug (case-insensitive substring).
+	// Query runs full-text search over name, description and slug. Word
+	// prefixes match ("cook" finds "cooking"); when nothing matches, the
+	// repository falls back to case-insensitive substring search.
 	Query string
 	// CategoryID and CategorySlug are alternative taxonomy filters.
 	CategoryID    *string
@@ -90,7 +92,8 @@ type ListFilter struct {
 	CreatedAfter  *time.Time
 	CreatedBefore *time.Time
 	ActiveOnly    bool
-	// Sort is a whitelisted order key; empty means "name_asc".
+	// Sort is a whitelisted order key; empty means "relevance" when Query
+	// is set, otherwise "name_asc".
 	Sort   string
 	Page   int
 	Limit  int

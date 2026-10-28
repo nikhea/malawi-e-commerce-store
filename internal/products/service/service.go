@@ -134,6 +134,7 @@ var productSorts = map[string]bool{
 	"oldest":      true,
 	"rating_asc":  true,
 	"rating_desc": true,
+	"relevance":   true,
 }
 
 func (s *service) List(ctx context.Context, f public.ListFilter) (public.Page, error) {
@@ -167,16 +168,25 @@ func (s *service) List(ctx context.Context, f public.ListFilter) (public.Page, e
 		return public.Page{}, apperr.Validation("created_after cannot be after created_before")
 	}
 
+	query := strings.TrimSpace(f.Query)
 	sortKey := strings.TrimSpace(f.Sort)
 	if sortKey == "" {
-		sortKey = "name_asc"
+		// Search results read best by relevance; browsing keeps the
+		// historical name order.
+		if query != "" {
+			sortKey = "relevance"
+		} else {
+			sortKey = "name_asc"
+		}
 	}
 	if !productSorts[sortKey] {
-		return public.Page{}, apperr.Validation("unknown sort; use name_asc, name_desc, price_asc, price_desc, newest, oldest, rating_asc or rating_desc")
+		return public.Page{}, apperr.Validation("unknown sort; use name_asc, name_desc, price_asc, price_desc, newest, oldest, rating_asc, rating_desc or relevance")
+	}
+	if sortKey == "relevance" && query == "" {
+		return public.Page{}, apperr.Validation("relevance sort requires q")
 	}
 
 	limit, offset := pagination.Normalize(f.Page, f.Limit, f.Offset)
-	query := strings.TrimSpace(f.Query)
 	size := strings.TrimSpace(f.Size)
 	categoryID := trimOptional(f.CategoryID)
 	categorySlug := trimOptional(f.CategorySlug)

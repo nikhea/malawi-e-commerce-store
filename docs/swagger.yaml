@@ -2077,7 +2077,8 @@ paths:
         Lightweight catalog rows (no variants — fetch Detail per product).
         Ships {"data": [rows], "meta": {page, limit, offset, total, total_pages, has_next, has_prev}}.
       parameters:
-      - description: Search name, description or slug
+      - description: Full-text search over name, description and slug (word prefixes;
+          substring fallback)
         in: query
         name: q
         type: string
@@ -2121,7 +2122,8 @@ paths:
         in: query
         name: active_only
         type: boolean
-      - description: name_asc|name_desc|price_asc|price_desc|newest|oldest|rating_asc|rating_desc
+      - description: name_asc|name_desc|price_asc|price_desc|newest|oldest|rating_asc|rating_desc|relevance
+          (default relevance when q is set)
         in: query
         name: sort
         type: string

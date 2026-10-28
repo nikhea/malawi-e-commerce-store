@@ -244,6 +244,7 @@ enforces this at build time).
 - Docs + auth tolerance (`4c9d8ab`): Scalar dark reference at `/docs` (CDN, offline fallback is `/swagger`); JWT accepts bare tokens (Swagger UI sends no prefix).
 - Docker (this change): multistage `dev/staging/production` (Air loop, 77MB hardened runtime, non-root + healthcheck); worker via entrypoint override; migrations stay outside the image.
 - npm SDK (`sdk/`): `@malawistore/malawi-store-sdk` — zero-dependency TypeScript client mirroring the full `/api/v1` surface (auth, users, categories, products, variants, inventory, wishlist, cart, orders, payments, reviews) plus money helpers (USD cents, legacy MWK) and 28 districts. Envelope unwrapping in the transport, coded `ApiError` passthrough from `pkg/apperr`, token getter or `setToken`. Wire types in `sdk/src/types.ts` must be updated in the same commit as any module `dto/` change.
+- Full-text catalog search (this change): generated weighted `products.search_vector` (name A, description B, slug C) with a GIN index (`0016`); prefix `tsquery` ranking, `sort=relevance` as the default when `q` is set, and the existing ILIKE search as a fallback only when FTS returns zero rows. Search stays behind `GET /products?q=`; both SDKs add the `relevance` sort key and the agent's `list-products` tool gains `query`.
 
 Rules for this section: one bullet per landed module, commit hash included,
 key decisions noted (they explain otherwise-surprising code). Keep it to

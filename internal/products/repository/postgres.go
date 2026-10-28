@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nikhea/malawi-e-commerce-store/internal/products/model"
+	"github.com/nikhea/malawi-e-commerce-store/internal/products/utils"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
 )
 
@@ -95,10 +96,26 @@ func (r *Postgres) GetBySlug(ctx context.Context, slug string) (model.Product, e
 }
 
 // List returns one page plus the total number of rows matching the same
-// filters. The count runs separately so an empty page still carries an
-// accurate total.
+// filters. A non-empty query runs full-text search first; when that finds
+// nothing, the existing substring search runs so partial terms still work.
 func (r *Postgres) List(ctx context.Context, f model.ListFilter) ([]model.Product, int64, error) {
-	where, args := productWhere(f)
+	tsQuery := utils.TSQuery(f.Query)
+	if tsQuery == "" {
+		return r.list(ctx, f, "")
+	}
+	products, total, err := r.list(ctx, f, tsQuery)
+	if err != nil || total > 0 {
+		return products, total, err
+	}
+	// No word-prefix matches: keep ILIKE as a safety net for infix and
+	// punctuation-heavy queries.
+	return r.list(ctx, f, "")
+}
+
+// list runs the count + page pair for one search mode. tsQuery == "" means
+// substring mode; otherwise the catalog is filtered by a full-text match.
+func (r *Postgres) list(ctx context.Context, f model.ListFilter, tsQuery string) ([]model.Product, int64, error) {
+	where, args, tsParam := productWhere(f, tsQuery)
 
 	countQ := `SELECT COUNT(*) ` + productFrom + ` WHERE ` + where
 	var total int64
@@ -108,7 +125,7 @@ func (r *Postgres) List(ctx context.Context, f model.ListFilter) ([]model.Produc
 
 	listArgs := append(append([]any{}, args...), f.Limit, f.Offset)
 	q := `SELECT ` + productColumns + ` ` + productFrom + ` WHERE ` + where +
-		` ORDER BY ` + productOrder(f.Sort) +
+		` ORDER BY ` + productOrder(f.Sort, tsParam) +
 		fmt.Sprintf(` LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2)
 
 	rows, err := r.pool.Query(ctx, q, listArgs...)
@@ -132,25 +149,35 @@ func (r *Postgres) List(ctx context.Context, f model.ListFilter) ([]model.Produc
 
 // productWhere translates the validated filter into a parameterized
 // predicate. Values never reach the SQL string; only placeholders do.
-func productWhere(f model.ListFilter) (string, []any) {
+// tsQuery non-empty selects full-text mode; empty selects substring mode.
+// The returned tsParam is the tsquery placeholder reused by ORDER BY
+// (empty in substring mode).
+func productWhere(f model.ListFilter, tsQuery string) (string, []any, string) {
 	clauses := []string{"1 = 1"}
 	args := []any{}
 	add := func(v any) string {
 		args = append(args, v)
 		return fmt.Sprintf("$%d", len(args))
 	}
+	tsParam := ""
 
 	if f.ActiveOnly {
 		clauses = append(clauses, "p.is_active")
 	}
 	if f.Query != "" {
-		pattern := "%" + escapeLike(f.Query) + "%"
-		n := add(pattern)
-		// lower() mirrors the trigram indexes in 0014; ILIKE alone would
-		// not match an index on lower(column).
-		clauses = append(clauses, fmt.Sprintf(
-			`(lower(p.name) LIKE lower(%s) ESCAPE '\' OR lower(p.description) LIKE lower(%s) ESCAPE '\' OR lower(p.slug) LIKE lower(%s) ESCAPE '\')`,
-			n, n, n))
+		if tsQuery != "" {
+			tsParam = add(tsQuery)
+			clauses = append(clauses, fmt.Sprintf(
+				`p.search_vector @@ to_tsquery('english', %s)`, tsParam))
+		} else {
+			pattern := "%" + escapeLike(f.Query) + "%"
+			n := add(pattern)
+			// lower() mirrors the trigram indexes in 0014; ILIKE alone
+			// would not match an index on lower(column).
+			clauses = append(clauses, fmt.Sprintf(
+				`(lower(p.name) LIKE lower(%s) ESCAPE '\' OR lower(p.description) LIKE lower(%s) ESCAPE '\' OR lower(p.slug) LIKE lower(%s) ESCAPE '\')`,
+				n, n, n))
+		}
 	}
 	if f.CategoryID != nil {
 		clauses = append(clauses, fmt.Sprintf("p.category_id = %s", add(*f.CategoryID)))
@@ -189,13 +216,14 @@ func productWhere(f model.ListFilter) (string, []any) {
 	if f.CreatedBefore != nil {
 		clauses = append(clauses, fmt.Sprintf("p.created_at <= %s", add(*f.CreatedBefore)))
 	}
-	return strings.Join(clauses, " AND "), args
+	return strings.Join(clauses, " AND "), args, tsParam
 }
 
 // productOrder is a closed whitelist: never interpolate a client sort
 // string. Every order ends with p.id so equal keys stay deterministic
-// across pages.
-func productOrder(sortKey string) string {
+// across pages. tsParam is empty in substring mode, where relevance falls
+// back to name order.
+func productOrder(sortKey, tsParam string) string {
 	switch sortKey {
 	case "name_desc":
 		return "p.name DESC, p.id ASC"
@@ -211,6 +239,13 @@ func productOrder(sortKey string) string {
 		return "(SELECT AVG(r.rating) FROM reviews r WHERE r.product_id = p.id) DESC NULLS LAST, p.name ASC, p.id ASC"
 	case "rating_asc":
 		return "(SELECT AVG(r.rating) FROM reviews r WHERE r.product_id = p.id) ASC NULLS LAST, p.name ASC, p.id ASC"
+	case "relevance":
+		if tsParam == "" {
+			return "p.name ASC, p.id ASC"
+		}
+		return fmt.Sprintf(
+			"ts_rank_cd(p.search_vector, to_tsquery('english', %s)) DESC, p.name ASC, p.id ASC",
+			tsParam)
 	default: // name_asc
 		return "p.name ASC, p.id ASC"
 	}
