@@ -170,7 +170,7 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 	river.AddWorker(workers, jobs.NewExpireReservationsWorker(inventorySvc, ordersSvc))
 	paymentsSvc := payments.Wire(pool, ordersSvc,
 		paymentsgateway.NewStripeGateway(cfg.StripeSecretKey), notifySvc,
-		cfg.StripeWebhookSecret, cfg.FXMWKPerUSD, cfg.FrontendURL)
+		cfg.StripeWebhookSecret, cfg.FXMWKPerUSD, cfg.AppURL)
 	notifySvc.AttachOrders(ordersSvc)
 
 	authSvc := auth.Wire(pool, usersSvc, notifySvc,

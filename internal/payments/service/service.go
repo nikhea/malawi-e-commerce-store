@@ -179,7 +179,8 @@ func (s *service) HandleWebhook(ctx context.Context, payload []byte, sigHeader s
 		// Hosted Checkout sessions do not create a local payment-intent row
 		// until payment is attempted. The signed Stripe event carries the
 		// authenticated order metadata, so settle the order directly.
-		return s.orders.MarkPaid(ctx, evt.OrderRef)
+		_, err := s.orders.MarkPaid(ctx, evt.OrderRef)
+		return err
 	case "checkout.session.async_payment_failed":
 		if evt.OrderRef == "" {
 			return nil

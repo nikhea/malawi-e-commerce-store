@@ -368,6 +368,17 @@ definitions:
       meta:
         $ref: '#/definitions/pagination.Meta'
     type: object
+  public.CheckoutSession:
+    properties:
+      expires_at:
+        type: integer
+      id:
+        type: string
+      order_id:
+        type: string
+      url:
+        type: string
+    type: object
   public.Detail:
     properties:
       product:
@@ -2030,6 +2041,47 @@ paths:
       summary: Check out my cart
       tags:
       - orders
+  /payments/checkout-sessions:
+    post:
+      consumes:
+      - application/json
+      description: Returns a URL for Stripe's hosted checkout page for the owned pending
+        order.
+      parameters:
+      - description: Order
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateIntentRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/public.CheckoutSession'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create a hosted Stripe Checkout session
+      tags:
+      - payments
   /payments/intents:
     post:
       consumes:
