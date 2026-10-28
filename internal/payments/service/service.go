@@ -18,8 +18,9 @@ var _ public.Service = (*service)(nil)
 // below this are rejected instead of failing obscurely at Stripe.
 const stripeMinCents = 50
 
-// chargeCurrency is what Stripe bills. MWK is unsupported, so MWK
-// tambala convert at Config.FXRate (a real FX provider plugs in here).
+// chargeCurrency is what Stripe bills. The catalog is priced in USD, so
+// USD orders charge their subtotal directly; legacy MWK orders convert at
+// Config.FXMWKPerUSD (a real FX provider plugs in here).
 const chargeCurrency = "usd"
 
 // Repository is the port this service needs from persistence.
@@ -60,9 +61,18 @@ func NewService(repo Repository, orders orderspublic.Service, gw gateway.Gateway
 	return &service{repo: repo, orders: orders, gw: gw, secret: cfg.WebhookSecret, fxRate: rate, notify: notify}
 }
 
-// toStripeCents converts MWK tambala to billable USD cents.
-func toStripeCents(mwkTambala int64, rate float64) int64 {
-	return int64(math.Round(float64(mwkTambala) / rate))
+// toChargeCents converts an order total to the USD cents Stripe bills.
+// USD orders are already USD cents. Legacy MWK orders (snapshotted before
+// the catalog switched currencies) convert at the configured FX rate.
+func toChargeCents(amountCents int64, currency string, rate float64) (int64, error) {
+	switch strings.ToUpper(strings.TrimSpace(currency)) {
+	case "", "USD":
+		return amountCents, nil
+	case "MWK":
+		return int64(math.Round(float64(amountCents) / rate)), nil
+	default:
+		return 0, apperr.Validation("unsupported order currency: " + currency)
+	}
 }
 
 func toPublic(p model.Payment) public.Payment {
@@ -86,7 +96,10 @@ func (s *service) CreateIntent(ctx context.Context, userID, orderID string) (pub
 		return public.Payment{}, apperr.Conflict("order is not pending")
 	}
 
-	usd := toStripeCents(order.SubtotalCents, s.fxRate)
+	usd, err := toChargeCents(order.SubtotalCents, order.Currency, s.fxRate)
+	if err != nil {
+		return public.Payment{}, err
+	}
 	if usd < stripeMinCents {
 		return public.Payment{}, apperr.Validation("order total is below the minimum charge")
 	}

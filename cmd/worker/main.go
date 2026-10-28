@@ -74,10 +74,10 @@ func run(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error {
 	// as the API — assembly stays identical on both sides.
 	usersSvc := users.Wire(pool)
 	categoriesSvc := categories.Wire(pool)
-	variantsSvc := variants.Wire(pool)
+	inventorySvc := inventory.Wire(pool)
+	variantsSvc := variants.Wire(pool, inventorySvc)
 	productsSvc := products.Wire(pool, categoriesSvc, variantsSvc)
 	cartSvc := cart.Wire(pool, productsSvc, usersSvc)
-	inventorySvc := inventory.Wire(pool)
 
 	// Worker needs no notifier: it WORKS the mail queue (send_mail jobs)
 	// rather than enqueueing. Expiry cancellations here stay silent —

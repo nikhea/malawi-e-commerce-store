@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -64,25 +65,92 @@ func (r *Postgres) GetBySlug(ctx context.Context, slug string) (model.Category, 
 	return scanCategory(r.pool.QueryRow(ctx, q, strings.ToLower(slug)))
 }
 
-func (r *Postgres) List(ctx context.Context) ([]model.Category, error) {
-	const q = `SELECT ` + categoryColumns + ` FROM categories ORDER BY name`
-	rows, err := r.pool.Query(ctx, q)
+// List returns one page plus the total matching the same filters.
+func (r *Postgres) List(ctx context.Context, f model.ListFilter) ([]model.Category, int64, error) {
+	where, args := categoryWhere(f)
+
+	countQ := `SELECT COUNT(*) FROM categories c WHERE ` + where
+	var total int64
+	if err := r.pool.QueryRow(ctx, countQ, args...).Scan(&total); err != nil {
+		return nil, 0, apperr.Internal(err)
+	}
+
+	listArgs := append(append([]any{}, args...), f.Limit, f.Offset)
+	q := `SELECT ` + categoryColumns + ` FROM categories c WHERE ` + where +
+		` ORDER BY ` + categoryOrder(f.Sort) +
+		fmt.Sprintf(` LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2)
+
+	rows, err := r.pool.Query(ctx, q, listArgs...)
 	if err != nil {
-		return nil, apperr.Internal(err)
+		return nil, 0, apperr.Internal(err)
 	}
 	defer rows.Close()
 	out := []model.Category{}
 	for rows.Next() {
 		c, err := scanCategory(rows)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		out = append(out, c)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, apperr.Internal(err)
+		return nil, 0, apperr.Internal(err)
 	}
-	return out, nil
+	return out, total, nil
+}
+
+func categoryWhere(f model.ListFilter) (string, []any) {
+	clauses := []string{"1 = 1"}
+	args := []any{}
+	add := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+
+	if f.Query != "" {
+		pattern := "%" + escapeLike(f.Query) + "%"
+		n := add(pattern)
+		clauses = append(clauses, fmt.Sprintf(
+			`(lower(c.name) LIKE lower(%s) ESCAPE '\' OR lower(c.description) LIKE lower(%s) ESCAPE '\' OR lower(c.slug) LIKE lower(%s) ESCAPE '\')`,
+			n, n, n))
+	}
+	if f.ParentID != nil {
+		clauses = append(clauses, fmt.Sprintf("c.parent_id = %s", add(*f.ParentID)))
+	}
+	if f.RootOnly {
+		clauses = append(clauses, "c.parent_id IS NULL")
+	}
+	if f.HasProducts != nil {
+		const stocked = `EXISTS (SELECT 1 FROM products p
+			WHERE p.category_id = c.id AND p.is_active)`
+		if *f.HasProducts {
+			clauses = append(clauses, stocked)
+		} else {
+			clauses = append(clauses, "NOT "+stocked)
+		}
+	}
+	return strings.Join(clauses, " AND "), args
+}
+
+func categoryOrder(sortKey string) string {
+	switch sortKey {
+	case "name_desc":
+		return "c.name DESC, c.id ASC"
+	case "newest":
+		return "c.created_at DESC, c.id ASC"
+	case "oldest":
+		return "c.created_at ASC, c.id ASC"
+	case "product_count_desc":
+		return `(SELECT COUNT(*) FROM products p WHERE p.category_id = c.id AND p.is_active) DESC, c.name ASC, c.id ASC`
+	case "product_count_asc":
+		return `(SELECT COUNT(*) FROM products p WHERE p.category_id = c.id AND p.is_active) ASC, c.name ASC, c.id ASC`
+	default: // name_asc
+		return "c.name ASC, c.id ASC"
+	}
+}
+
+func escapeLike(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
 }
 
 func (r *Postgres) Update(ctx context.Context, c model.Category) (model.Category, error) {

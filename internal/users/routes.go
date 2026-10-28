@@ -20,6 +20,7 @@ func RegisterRoutes(g *gin.RouterGroup, svc public.Service) {
 	users.GET("/:id", h.GetByID)
 
 	admin := g.Group("/admin", middleware.RequireRole(string(public.RoleAdmin)))
+	admin.GET("/users", h.List)
 	admin.GET("/users/:id", h.GetByID)
 	admin.PATCH("/users/:id/role", h.SetRole)
 }

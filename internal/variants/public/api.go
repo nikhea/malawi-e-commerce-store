@@ -8,16 +8,22 @@ import (
 	"time"
 )
 
-// Variant is one sellable SKU. Price is absolute minor units (tambala),
-// NOT a delta — no base+delta math bugs at checkout.
+// Variant is one sellable SKU. Price is absolute USD cents, NOT a delta —
+// no base+delta math bugs at checkout. (Legacy MWK orders keep their own
+// snapshots in tambala.)
 type Variant struct {
-	ID         string    `json:"id" example:"3fa85f64-5717-4562-b3fc-2c963f66afa6"`
-	ProductID  string    `json:"product_id"`
-	Name       string    `json:"name" example:"500ml"`
-	SKU        string    `json:"sku" example:"OIL-500-001"`
-	PriceCents int64     `json:"price_cents" example:"2500"`
-	IsActive   bool      `json:"is_active"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID         string `json:"id" example:"3fa85f64-5717-4562-b3fc-2c963f66afa6"`
+	ProductID  string `json:"product_id"`
+	Name       string `json:"name" example:"500ml"`
+	SKU        string `json:"sku" example:"OIL-500-001"`
+	PriceCents int64  `json:"price_cents" example:"2500"`
+	IsActive   bool   `json:"is_active"`
+	// Available is on-hand minus active reservations: the number a
+	// shopper can add to the cart right now. Zero for a brand-new SKU
+	// until an admin sets stock.
+	Available int       `json:"available" example:"16"`
+	InStock   bool      `json:"in_stock" example:"true"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // CreateVariantInput carries a new SKU. Product existence is enforced by

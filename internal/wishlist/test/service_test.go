@@ -57,7 +57,7 @@ func (fakeProducts) detail(id string) (productspublic.Detail, error) {
 		return productspublic.Detail{}, apperr.NotFound("product not found")
 	}
 	return productspublic.Detail{
-		Product: productspublic.Product{ID: "prod-1", Name: "Oil", Slug: "oil", PriceCents: 1000, Currency: "MWK"},
+		Product: productspublic.Product{ID: "prod-1", Name: "Oil", Slug: "oil", PriceCents: 1000, Currency: "USD"},
 	}, nil
 }
 
@@ -70,8 +70,8 @@ func (f fakeProducts) GetByID(_ context.Context, id string) (productspublic.Deta
 func (f fakeProducts) GetBySlug(context.Context, string) (productspublic.Detail, error) {
 	return productspublic.Detail{}, apperr.NotFound("product not found")
 }
-func (f fakeProducts) List(context.Context, productspublic.ListFilter) ([]productspublic.Product, error) {
-	return nil, nil
+func (f fakeProducts) List(context.Context, productspublic.ListFilter) (productspublic.Page, error) {
+	return productspublic.Page{}, nil
 }
 func (f fakeProducts) Update(context.Context, string, productspublic.UpdateProductInput) (productspublic.Product, error) {
 	return productspublic.Product{}, nil
@@ -102,6 +102,10 @@ func (fakeUsers) GetCredentials(context.Context, string) (userspublic.Credential
 func (fakeUsers) SetRole(context.Context, string, userspublic.Role) (userspublic.User, error) {
 	return userspublic.User{}, nil
 }
+func (fakeUsers) List(context.Context, userspublic.ListFilter) (userspublic.Page, error) {
+	return userspublic.Page{}, nil
+}
+
 func (fakeUsers) SetEmailVerified(context.Context, string, bool) (userspublic.User, error) {
 	return userspublic.User{}, nil
 }

@@ -29,17 +29,40 @@ func New(svc public.Service, media mediapublic.Service) *Handler {
 // List godoc
 // @Summary List categories
 // @Description Public storefront taxonomy, flat and ordered by name.
+// @Description Ships {"data": [rows], "meta": {page, limit, offset, total, total_pages, has_next, has_prev}}.
 // @Tags categories
 // @Produce json
-// @Success 200 {array} public.Category
+// @Param q query string false "Search name, description or slug"
+// @Param parent_id query string false "Only children of this category"
+// @Param root_only query bool false "Only root categories"
+// @Param has_products query bool false "Only categories with active products (false = empty only)"
+// @Param sort query string false "name_asc|name_desc|newest|oldest|product_count_asc|product_count_desc"
+// @Param page query int false "1-based page (wins over offset)"
+// @Param limit query int false "Page size (default 20, max 100)"
+// @Param offset query int false "Page offset"
+// @Success 200 {object} public.CategoryListResponse
+// @Failure 400 {object} response.ErrorResponse
 // @Router /categories [get]
 func (h *Handler) List(c *gin.Context) {
-	cats, err := h.svc.List(c.Request.Context())
+	var q dto.ListCategoriesQuery
+	if err := c.ShouldBindQuery(&q); err != nil {
+		response.Error(c, apperr.Validation("invalid query"))
+		return
+	}
+	rootOnly := false
+	if q.RootOnly != nil {
+		rootOnly = *q.RootOnly
+	}
+	page, err := h.svc.List(c.Request.Context(), public.ListFilter{
+		Query: q.Q, ParentID: q.ParentID, RootOnly: rootOnly,
+		HasProducts: q.HasProducts, Sort: q.Sort,
+		Page: q.Page, Limit: q.Limit, Offset: q.Offset,
+	})
 	if err != nil {
 		response.Error(c, err)
 		return
 	}
-	response.OK(c, cats)
+	response.OKMeta(c, page.Items, page.Meta)
 }
 
 // GetByID godoc

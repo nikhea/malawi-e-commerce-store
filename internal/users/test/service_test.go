@@ -2,6 +2,7 @@ package test
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -53,6 +54,56 @@ func (f *fakeRepo) GetByEmail(_ context.Context, email string) (model.User, erro
 		return model.User{}, apperr.NotFound("user not found")
 	}
 	return f.byID[id], nil
+}
+
+func (f *fakeRepo) List(_ context.Context, filter model.ListFilter) ([]model.User, int64, error) {
+	q := strings.ToLower(filter.Query)
+	out := make([]model.User, 0, len(f.byID))
+	for _, u := range f.byID {
+		if q != "" && !strings.Contains(strings.ToLower(u.Email), q) &&
+			!strings.Contains(strings.ToLower(u.Name), q) {
+			continue
+		}
+		if filter.Role != "" && u.Role != filter.Role {
+			continue
+		}
+		if filter.EmailVerified != nil && u.EmailVerified != *filter.EmailVerified {
+			continue
+		}
+		if filter.CreatedAfter != nil && u.CreatedAt.Before(*filter.CreatedAfter) {
+			continue
+		}
+		if filter.CreatedBefore != nil && u.CreatedAt.After(*filter.CreatedBefore) {
+			continue
+		}
+		out = append(out, u)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		switch filter.Sort {
+		case "oldest":
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		case "name_asc":
+			return out[i].Name < out[j].Name
+		case "name_desc":
+			return out[i].Name > out[j].Name
+		case "email_asc":
+			return out[i].Email < out[j].Email
+		case "email_desc":
+			return out[i].Email > out[j].Email
+		default:
+			return out[i].CreatedAt.After(out[j].CreatedAt)
+		}
+	})
+	total := int64(len(out))
+	start := filter.Offset
+	if start > len(out) {
+		start = len(out)
+	}
+	end := start + filter.Limit
+	if end > len(out) {
+		end = len(out)
+	}
+	return out[start:end], total, nil
 }
 
 func (f *fakeRepo) SetRole(_ context.Context, id, role string) (model.User, error) {
@@ -182,4 +233,62 @@ func TestGetAndSetRole(t *testing.T) {
 	if _, err := svc.SetRole(ctx, "missing", public.RoleAdmin); apperr.CodeOf(err) != apperr.CodeNotFound {
 		t.Fatalf("expected NOT_FOUND, got %v", err)
 	}
+}
+
+func TestList(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	seed := []model.User{
+		{ID: "u1", Email: "aisha@malawi.mw", Name: "Aisha Banda", Role: "customer", EmailVerified: true, CreatedAt: now.Add(-3 * time.Hour)},
+		{ID: "u2", Email: "boss@malawi.mw", Name: "Boss Phiri", Role: "admin", EmailVerified: true, CreatedAt: now.Add(-2 * time.Hour)},
+		{ID: "u3", Email: "chisomo@malawi.mw", Name: "Chisomo Zulu", Role: "customer", EmailVerified: false, CreatedAt: now.Add(-time.Hour)},
+	}
+	svc := service.NewService(newFakeRepo(seed...))
+
+	t.Run("search and role filters", func(t *testing.T) {
+		page, err := svc.List(ctx, public.ListFilter{Query: "aisha"})
+		if err != nil || page.Meta.Total != 1 || page.Items[0].ID != "u1" {
+			t.Fatalf("search failed: %+v %v", page, err)
+		}
+		page, err = svc.List(ctx, public.ListFilter{Role: public.RoleAdmin})
+		if err != nil || page.Meta.Total != 1 || page.Items[0].ID != "u2" {
+			t.Fatalf("role filter failed: %+v %v", page, err)
+		}
+		verified := false
+		page, err = svc.List(ctx, public.ListFilter{EmailVerified: &verified})
+		if err != nil || page.Meta.Total != 1 || page.Items[0].ID != "u3" {
+			t.Fatalf("verification filter failed: %+v %v", page, err)
+		}
+	})
+
+	t.Run("pagination and sort", func(t *testing.T) {
+		page, err := svc.List(ctx, public.ListFilter{Sort: "name_asc", Page: 2, Limit: 2})
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		if page.Meta.Total != 3 || page.Meta.Page != 2 || len(page.Items) != 1 {
+			t.Fatalf("bad page: %+v", page.Meta)
+		}
+		if page.Items[0].ID != "u3" {
+			t.Fatalf("expected third name, got %+v", page.Items[0])
+		}
+	})
+
+	t.Run("validation", func(t *testing.T) {
+		after := now
+		before := now.Add(-time.Hour)
+		cases := []public.ListFilter{
+			{Role: "seller"},
+			{Sort: "bogus"},
+			{Limit: -1},
+			{Offset: -1},
+			{Page: -1},
+			{CreatedAfter: &after, CreatedBefore: &before},
+		}
+		for _, f := range cases {
+			if _, err := svc.List(ctx, f); apperr.CodeOf(err) != apperr.CodeValidation {
+				t.Fatalf("expected VALIDATION_ERROR for %+v, got %v", f, err)
+			}
+		}
+	})
 }

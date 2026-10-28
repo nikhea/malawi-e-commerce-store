@@ -52,6 +52,16 @@ func (f *fakeRepo) GetStock(_ context.Context, productID string, variantID *stri
 	return model.Stock{ProductID: productID, VariantID: variantID}, nil
 }
 
+func (f *fakeRepo) ListStockByProduct(_ context.Context, productID string) ([]model.Stock, error) {
+	out := []model.Stock{}
+	for _, r := range f.stock {
+		if r.stock.ProductID == productID {
+			out = append(out, r.stock)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeRepo) Reserve(_ context.Context, orderRef string, lines []model.Reservation, _ time.Time) error {
 	for _, l := range lines {
 		r := f.stock[key(l.ProductID, l.VariantID)]
@@ -162,6 +172,30 @@ func TestReserveReleaseConfirm(t *testing.T) {
 	}
 	if err := svc.ConfirmByOrder(ctx, "ghost"); err != nil {
 		t.Fatalf("idempotent confirm: %v", err)
+	}
+}
+
+func TestListStockByProduct(t *testing.T) {
+	ctx := context.Background()
+	svc := newService()
+	variantID := "var-1"
+
+	if _, err := svc.SetStock(ctx, "prod-1", nil, 4); err != nil {
+		t.Fatalf("base stock: %v", err)
+	}
+	if _, err := svc.SetStock(ctx, "prod-1", &variantID, 9); err != nil {
+		t.Fatalf("variant stock: %v", err)
+	}
+
+	rows, err := svc.ListStockByProduct(ctx, "prod-1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 rows, got %d: %+v", len(rows), rows)
+	}
+	if _, err := svc.ListStockByProduct(ctx, "  "); apperr.CodeOf(err) != apperr.CodeValidation {
+		t.Fatalf("empty product: expected VALIDATION_ERROR, got %v", err)
 	}
 }
 

@@ -17,7 +17,8 @@ const (
 )
 
 // Payment is the charge view. AmountCents is the CHARGED amount (USD
-// cents); OrderAmountCents preserves the source MWK tambala.
+// cents); OrderAmountCents preserves the source order total in its own
+// minor units (USD cents for USD orders, tambala for legacy MWK orders).
 type Payment struct {
 	ID               string    `json:"id"`
 	OrderID          string    `json:"order_id"`

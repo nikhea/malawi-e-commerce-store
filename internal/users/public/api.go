@@ -6,6 +6,8 @@ package public
 import (
 	"context"
 	"time"
+
+	"github.com/nikhea/malawi-e-commerce-store/pkg/pagination"
 )
 
 // Role is the single-storefront access level. One store, no sellers:
@@ -26,6 +28,38 @@ type User struct {
 	Role          Role      `json:"role" example:"customer"`
 	EmailVerified bool      `json:"email_verified"`
 	CreatedAt     time.Time `json:"created_at"`
+}
+
+// ListFilter scopes the admin user directory. Zero value = newest first,
+// first page, no filters.
+type ListFilter struct {
+	// Query matches email or name (case-insensitive substring).
+	Query string
+	// Role narrows to admin or customer. Empty = every role.
+	Role Role
+	// EmailVerified true/false filters the verification flag; nil = both.
+	EmailVerified *bool
+	CreatedAfter  *time.Time
+	CreatedBefore *time.Time
+	// Sort: newest, oldest, name_asc, name_desc, email_asc, email_desc.
+	// Empty means newest.
+	Sort   string
+	Page   int
+	Limit  int
+	Offset int
+}
+
+// Page is one directory page.
+type Page struct {
+	Items []User
+	Meta  pagination.Meta
+}
+
+// UserListResponse is the documented wire shape for GET /admin/users:
+// rows under "data", paging counters under "meta".
+type UserListResponse struct {
+	Data []User          `json:"data"`
+	Meta pagination.Meta `json:"meta"`
 }
 
 // CreateUserInput carries everything needed to register an account.
@@ -56,6 +90,9 @@ type Service interface {
 	// GetCredentials returns the login-verification view for auth's
 	// password check. Same not-found semantics as GetByEmail.
 	GetCredentials(ctx context.Context, email string) (Credentials, error)
+	// List returns the admin user directory: filtered, sorted and paged.
+	// Admin-only: enforced by the RequireRole middleware, not here.
+	List(ctx context.Context, f ListFilter) (Page, error)
 	// SetRole changes an account's access level. Admin-only: enforced by
 	// the RequireRole middleware on /admin routes, not by this package.
 	SetRole(ctx context.Context, id string, role Role) (User, error)

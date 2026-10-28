@@ -58,8 +58,8 @@ func (f *fakeRepo) MarkStatus(_ context.Context, intentID, status string) (model
 	return p, nil
 }
 
-// fakeOrders serves one pending order ("order-1", 85000 tambala) and one
-// paid order ("order-paid").
+// fakeOrders serves USD pending orders plus a legacy MWK one and a paid
+// order for rejection paths.
 type fakeOrders struct {
 	paid      map[string]bool
 	markPaid  []string
@@ -73,9 +73,13 @@ func newFakeOrders() *fakeOrders {
 func (f *fakeOrders) order(id string) (orderspublic.Order, error) {
 	switch id {
 	case "order-1":
-		return orderspublic.Order{ID: "order-1", UserID: "u1", Status: orderspublic.StatusPending, SubtotalCents: 850000, Currency: "MWK"}, nil
+		return orderspublic.Order{ID: "order-1", UserID: "u1", Status: orderspublic.StatusPending, SubtotalCents: 8500, Currency: "USD"}, nil
+	case "order-legacy-mwk":
+		return orderspublic.Order{ID: "order-legacy-mwk", UserID: "u1", Status: orderspublic.StatusPending, SubtotalCents: 850000, Currency: "MWK"}, nil
+	case "order-eur":
+		return orderspublic.Order{ID: "order-eur", UserID: "u1", Status: orderspublic.StatusPending, SubtotalCents: 8500, Currency: "EUR"}, nil
 	case "order-paid":
-		return orderspublic.Order{ID: "order-paid", UserID: "u1", Status: orderspublic.StatusPaid, SubtotalCents: 85000, Currency: "MWK"}, nil
+		return orderspublic.Order{ID: "order-paid", UserID: "u1", Status: orderspublic.StatusPaid, SubtotalCents: 8500, Currency: "USD"}, nil
 	}
 	return orderspublic.Order{}, apperr.NotFound("order not found")
 }
@@ -164,18 +168,40 @@ func newFixture(verify func([]byte, string) (gateway.WebhookEvent, error)) *fixt
 func TestCreateIntent(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("converts MWK and creates", func(t *testing.T) {
+	t.Run("charges USD orders directly", func(t *testing.T) {
+		fx := newFixture(nil)
+		// USD orders are already in billable cents: $85.00 stays 8500.
+		p, err := fx.svc.CreateIntent(ctx, "u1", "order-1")
+		if err != nil {
+			t.Fatalf("intent: %v", err)
+		}
+		if p.AmountCents != 8500 || p.Currency != "USD" || p.OrderAmountCents != 8500 {
+			t.Fatalf("bad USD charge: %+v", p)
+		}
+		if p.ClientSecret == "" || p.StripeIntentID == "" {
+			t.Fatalf("missing stripe handle: %+v", p)
+		}
+	})
+
+	t.Run("converts legacy MWK orders", func(t *testing.T) {
 		fx := newFixture(nil)
 		// 850000 tambala (8500 MWK) / 1700 = $5.00 → 500 cents.
-		p, err := fx.svc.CreateIntent(ctx, "u1", "order-1")
+		p, err := fx.svc.CreateIntent(ctx, "u1", "order-legacy-mwk")
 		if err != nil {
 			t.Fatalf("intent: %v", err)
 		}
 		if p.AmountCents != 500 || p.Currency != "USD" || p.OrderAmountCents != 850000 {
 			t.Fatalf("bad conversion: %+v", p)
 		}
-		if p.ClientSecret == "" || p.StripeIntentID == "" {
-			t.Fatalf("missing stripe handle: %+v", p)
+	})
+
+	t.Run("rejects unsupported order currency", func(t *testing.T) {
+		fx := newFixture(nil)
+		if _, err := fx.svc.CreateIntent(ctx, "u1", "order-eur"); apperr.CodeOf(err) != apperr.CodeValidation {
+			t.Fatalf("expected VALIDATION_ERROR, got %v", err)
+		}
+		if fx.gw.intents != 0 {
+			t.Fatalf("intent created for unsupported currency")
 		}
 	})
 

@@ -1,0 +1,20 @@
+# Never baked into the image.
+.git/
+tmp/
+.env
+.env.local
+.env.*.local
+.opencode/
+
+# Local/editor noise.
+*.log
+*.out
+*.test
+coverage.txt
+coverage.html
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+uploads/

@@ -71,7 +71,7 @@ definitions:
       category_id:
         type: string
       currency:
-        example: MWK
+        example: USD
         type: string
       description:
         example: Pure sunflower oil
@@ -295,10 +295,34 @@ definitions:
     - code
     - email
     type: object
+  pagination.Meta:
+    properties:
+      has_next:
+        example: true
+        type: boolean
+      has_prev:
+        example: false
+        type: boolean
+      limit:
+        example: 20
+        type: integer
+      offset:
+        example: 0
+        type: integer
+      page:
+        example: 1
+        type: integer
+      total:
+        example: 50
+        type: integer
+      total_pages:
+        example: 3
+        type: integer
+    type: object
   public.Cart:
     properties:
       currency:
-        example: MWK
+        example: USD
         type: string
       id:
         type: string
@@ -335,6 +359,15 @@ definitions:
         example: cooking-oil
         type: string
     type: object
+  public.CategoryListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/public.Category'
+        type: array
+      meta:
+        $ref: '#/definitions/pagination.Meta'
+    type: object
   public.Detail:
     properties:
       product:
@@ -356,7 +389,7 @@ definitions:
   public.Line:
     properties:
       currency:
-        example: MWK
+        example: USD
         type: string
       id:
         type: string
@@ -385,7 +418,7 @@ definitions:
       created_at:
         type: string
       currency:
-        example: MWK
+        example: USD
         type: string
       id:
         type: string
@@ -453,7 +486,7 @@ definitions:
       created_at:
         type: string
       currency:
-        example: MWK
+        example: USD
         type: string
       description:
         example: Pure sunflower oil
@@ -475,10 +508,19 @@ definitions:
         example: sunseed-cooking-oil
         type: string
     type: object
+  public.ProductListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/public.Product'
+        type: array
+      meta:
+        $ref: '#/definitions/pagination.Meta'
+    type: object
   public.ProductSummary:
     properties:
       currency:
-        example: MWK
+        example: USD
         type: string
       id:
         type: string
@@ -599,13 +641,32 @@ definitions:
         - $ref: '#/definitions/public.Role'
         example: customer
     type: object
+  public.UserListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/public.User'
+        type: array
+      meta:
+        $ref: '#/definitions/pagination.Meta'
+    type: object
   public.Variant:
     properties:
+      available:
+        description: |-
+          Available is on-hand minus active reservations: the number a
+          shopper can add to the cart right now. Zero for a brand-new SKU
+          until an admin sets stock.
+        example: 16
+        type: integer
       created_at:
         type: string
       id:
         example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
         type: string
+      in_stock:
+        example: true
+        type: boolean
       is_active:
         type: boolean
       name:
@@ -622,8 +683,14 @@ definitions:
     type: object
   public.VariantView:
     properties:
+      available:
+        example: 16
+        type: integer
       id:
         type: string
+      in_stock:
+        example: true
+        type: boolean
       is_active:
         type: boolean
       name:
@@ -1207,6 +1274,70 @@ paths:
       summary: Remove any review (admin)
       tags:
       - admin
+  /admin/users:
+    get:
+      description: 'Admin user directory: search, role/verification filters and paging.'
+      parameters:
+      - description: Search email or name
+        in: query
+        name: q
+        type: string
+      - description: admin|customer
+        in: query
+        name: role
+        type: string
+      - description: Filter by verification state
+        in: query
+        name: email_verified
+        type: boolean
+      - description: Created at or after (RFC3339 or YYYY-MM-DD)
+        in: query
+        name: created_after
+        type: string
+      - description: Created at or before (RFC3339 or YYYY-MM-DD)
+        in: query
+        name: created_before
+        type: string
+      - description: newest|oldest|name_asc|name_desc|email_asc|email_desc
+        in: query
+        name: sort
+        type: string
+      - description: 1-based page (wins over offset)
+        in: query
+        name: page
+        type: integer
+      - description: Page size (default 20, max 100)
+        in: query
+        name: limit
+        type: integer
+      - description: Page offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.UserListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List users (admin)
+      tags:
+      - admin
   /admin/users/{id}/role:
     patch:
       consumes:
@@ -1695,16 +1826,53 @@ paths:
       - cart
   /categories:
     get:
-      description: Public storefront taxonomy, flat and ordered by name.
+      description: |-
+        Public storefront taxonomy, flat and ordered by name.
+        Ships {"data": [rows], "meta": {page, limit, offset, total, total_pages, has_next, has_prev}}.
+      parameters:
+      - description: Search name, description or slug
+        in: query
+        name: q
+        type: string
+      - description: Only children of this category
+        in: query
+        name: parent_id
+        type: string
+      - description: Only root categories
+        in: query
+        name: root_only
+        type: boolean
+      - description: Only categories with active products (false = empty only)
+        in: query
+        name: has_products
+        type: boolean
+      - description: name_asc|name_desc|newest|oldest|product_count_asc|product_count_desc
+        in: query
+        name: sort
+        type: string
+      - description: 1-based page (wins over offset)
+        in: query
+        name: page
+        type: integer
+      - description: Page size (default 20, max 100)
+        in: query
+        name: limit
+        type: integer
+      - description: Page offset
+        in: query
+        name: offset
+        type: integer
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/public.Category'
-            type: array
+            $ref: '#/definitions/public.CategoryListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
       summary: List categories
       tags:
       - categories
@@ -1866,7 +2034,8 @@ paths:
     post:
       consumes:
       - application/json
-      description: Validates ownership, converts the MWK total, reuses pending intents.
+      description: Validates ownership, converts legacy MWK totals to USD, reuses
+        pending intents.
       parameters:
       - description: Order
         in: body
@@ -1904,16 +2073,62 @@ paths:
       - payments
   /products:
     get:
-      description: Lightweight catalog rows (no variants — fetch Detail per product).
+      description: |-
+        Lightweight catalog rows (no variants — fetch Detail per product).
+        Ships {"data": [rows], "meta": {page, limit, offset, total, total_pages, has_next, has_prev}}.
       parameters:
-      - description: Filter by category
+      - description: Search name, description or slug
+        in: query
+        name: q
+        type: string
+      - description: Filter by category UUID
         in: query
         name: category_id
+        type: string
+      - description: Filter by category slug
+        in: query
+        name: category_slug
+        type: string
+      - description: Minimum price in USD cents
+        in: query
+        name: min_price_cents
+        type: integer
+      - description: Maximum price in USD cents
+        in: query
+        name: max_price_cents
+        type: integer
+      - description: Only products with sellable stock (false = out of stock only)
+        in: query
+        name: in_stock
+        type: boolean
+      - description: Variant size name, e.g. XS, M, XL
+        in: query
+        name: size
+        type: string
+      - description: Minimum average review rating (0-5)
+        in: query
+        name: min_rating
+        type: number
+      - description: Created at or after (RFC3339 or YYYY-MM-DD)
+        in: query
+        name: created_after
+        type: string
+      - description: Created at or before (RFC3339 or YYYY-MM-DD)
+        in: query
+        name: created_before
         type: string
       - description: Hide inactive (default true)
         in: query
         name: active_only
         type: boolean
+      - description: name_asc|name_desc|price_asc|price_desc|newest|oldest|rating_asc|rating_desc
+        in: query
+        name: sort
+        type: string
+      - description: 1-based page (wins over offset)
+        in: query
+        name: page
+        type: integer
       - description: Page size (default 20, max 100)
         in: query
         name: limit
@@ -1928,9 +2143,11 @@ paths:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/public.Product'
-            type: array
+            $ref: '#/definitions/public.ProductListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
       summary: List products
       tags:
       - products
@@ -2338,7 +2555,7 @@ paths:
       - wishlist
 securityDefinitions:
   BearerAuth:
-    description: JWT. Prefix with "Bearer ".
+    description: JWT — paste with or without the "Bearer" prefix.
     in: header
     name: Authorization
     type: apiKey

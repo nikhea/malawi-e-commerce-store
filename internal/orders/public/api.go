@@ -33,7 +33,7 @@ type Order struct {
 	UserID        string      `json:"user_id"`
 	Status        string      `json:"status" example:"pending"`
 	SubtotalCents int64       `json:"subtotal_cents"`
-	Currency      string      `json:"currency" example:"MWK"`
+	Currency      string      `json:"currency" example:"USD"`
 	Lines         []OrderLine `json:"lines"`
 	CreatedAt     time.Time   `json:"created_at"`
 }

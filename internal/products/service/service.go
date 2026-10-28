@@ -9,6 +9,7 @@ import (
 	"github.com/nikhea/malawi-e-commerce-store/internal/products/public"
 	variantspublic "github.com/nikhea/malawi-e-commerce-store/internal/variants/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/pagination"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/slug"
 )
 
@@ -19,7 +20,7 @@ type Repository interface {
 	Create(ctx context.Context, p model.Product) (model.Product, error)
 	GetByID(ctx context.Context, id string) (model.Product, error)
 	GetBySlug(ctx context.Context, slug string) (model.Product, error)
-	List(ctx context.Context, categoryID *string, activeOnly bool, limit, offset int) ([]model.Product, error)
+	List(ctx context.Context, f model.ListFilter) ([]model.Product, int64, error)
 	Update(ctx context.Context, p model.Product) (model.Product, error)
 	Delete(ctx context.Context, id string) error
 	SetImage(ctx context.Context, id, url, publicID string) (model.Product, error)
@@ -50,6 +51,7 @@ func toDetail(p model.Product, variants []variantspublic.Variant) public.Detail 
 		views = append(views, public.VariantView{
 			ID: v.ID, Name: v.Name, SKU: v.SKU,
 			PriceCents: v.PriceCents, IsActive: v.IsActive,
+			Available: v.Available, InStock: v.InStock,
 		})
 	}
 	return public.Detail{Product: toPublic(p), Variants: views}
@@ -80,7 +82,7 @@ func (s *service) Create(ctx context.Context, in public.CreateProductInput) (pub
 	}
 	currency := strings.ToUpper(strings.TrimSpace(in.Currency))
 	if currency == "" {
-		currency = "MWK"
+		currency = "USD"
 	}
 	if in.CategoryID != nil {
 		if _, err := s.categories.GetByID(ctx, *in.CategoryID); err != nil {
@@ -123,26 +125,90 @@ func (s *service) GetBySlug(ctx context.Context, slugStr string) (public.Detail,
 	return s.detail(ctx, p)
 }
 
-func (s *service) List(ctx context.Context, f public.ListFilter) ([]public.Product, error) {
-	limit := f.Limit
-	if limit <= 0 {
-		limit = 20
-	}
-	if limit > 100 {
-		limit = 100
+var productSorts = map[string]bool{
+	"name_asc":    true,
+	"name_desc":   true,
+	"price_asc":   true,
+	"price_desc":  true,
+	"newest":      true,
+	"oldest":      true,
+	"rating_asc":  true,
+	"rating_desc": true,
+}
+
+func (s *service) List(ctx context.Context, f public.ListFilter) (public.Page, error) {
+	if f.Limit < 0 {
+		return public.Page{}, apperr.Validation("limit cannot be negative")
 	}
 	if f.Offset < 0 {
-		return nil, apperr.Validation("offset cannot be negative")
+		return public.Page{}, apperr.Validation("offset cannot be negative")
 	}
-	products, err := s.repo.List(ctx, f.CategoryID, f.ActiveOnly, limit, f.Offset)
+	if f.Page < 0 {
+		return public.Page{}, apperr.Validation("page cannot be negative")
+	}
+	if f.MinPriceCents != nil && *f.MinPriceCents < 0 {
+		return public.Page{}, apperr.Validation("min_price_cents cannot be negative")
+	}
+	if f.MaxPriceCents != nil && *f.MaxPriceCents < 0 {
+		return public.Page{}, apperr.Validation("max_price_cents cannot be negative")
+	}
+	if f.MinPriceCents != nil && f.MaxPriceCents != nil && *f.MinPriceCents > *f.MaxPriceCents {
+		return public.Page{}, apperr.Validation("min_price_cents cannot exceed max_price_cents")
+	}
+	if f.MinRating != nil {
+		if *f.MinRating < 0 || *f.MinRating > 5 {
+			return public.Page{}, apperr.Validation("min_rating must be between 0 and 5")
+		}
+		if *f.MinRating == 0 {
+			f.MinRating = nil // 0 means "no rating floor", not "unreviewed only"
+		}
+	}
+	if f.CreatedAfter != nil && f.CreatedBefore != nil && f.CreatedAfter.After(*f.CreatedBefore) {
+		return public.Page{}, apperr.Validation("created_after cannot be after created_before")
+	}
+
+	sortKey := strings.TrimSpace(f.Sort)
+	if sortKey == "" {
+		sortKey = "name_asc"
+	}
+	if !productSorts[sortKey] {
+		return public.Page{}, apperr.Validation("unknown sort; use name_asc, name_desc, price_asc, price_desc, newest, oldest, rating_asc or rating_desc")
+	}
+
+	limit, offset := pagination.Normalize(f.Page, f.Limit, f.Offset)
+	query := strings.TrimSpace(f.Query)
+	size := strings.TrimSpace(f.Size)
+	categoryID := trimOptional(f.CategoryID)
+	categorySlug := trimOptional(f.CategorySlug)
+
+	products, total, err := s.repo.List(ctx, model.ListFilter{
+		Query: query, CategoryID: categoryID, CategorySlug: categorySlug,
+		MinPriceCents: f.MinPriceCents, MaxPriceCents: f.MaxPriceCents,
+		InStock: f.InStock, Size: size, MinRating: f.MinRating,
+		CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore,
+		ActiveOnly: f.ActiveOnly, Sort: sortKey, Limit: limit, Offset: offset,
+	})
 	if err != nil {
-		return nil, err
+		return public.Page{}, err
 	}
 	out := make([]public.Product, 0, len(products))
 	for _, p := range products {
 		out = append(out, toPublic(p))
 	}
-	return out, nil
+	return public.Page{Items: out, Meta: pagination.NewMeta(total, limit, offset)}, nil
+}
+
+// trimOptional turns blank optional filters into nil so the repository
+// does not emit predicates for empty query-string values.
+func trimOptional(v *string) *string {
+	if v == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*v)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
 }
 
 func (s *service) Update(ctx context.Context, id string, in public.UpdateProductInput) (public.Product, error) {

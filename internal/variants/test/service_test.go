@@ -3,7 +3,9 @@ package test
 import (
 	"context"
 	"testing"
+	"time"
 
+	inventorypublic "github.com/nikhea/malawi-e-commerce-store/internal/inventory/public"
 	"github.com/nikhea/malawi-e-commerce-store/internal/variants/model"
 	"github.com/nikhea/malawi-e-commerce-store/internal/variants/public"
 	"github.com/nikhea/malawi-e-commerce-store/internal/variants/service"
@@ -78,11 +80,37 @@ func (f *fakeRepo) Delete(_ context.Context, id string) error {
 
 func strptr(s string) *string { return &s }
 
+// fakeInventory reports 16 units for the stock test SKU.
+type fakeInventory struct{}
+
+func (fakeInventory) SetStock(context.Context, string, *string, int) (inventorypublic.Stock, error) {
+	return inventorypublic.Stock{}, nil
+}
+func (fakeInventory) GetStock(_ context.Context, productID string, variantID *string) (inventorypublic.Stock, error) {
+	return inventorypublic.Stock{ProductID: productID, VariantID: variantID, OnHand: 16, Available: 16}, nil
+}
+func (fakeInventory) ListStockByProduct(_ context.Context, productID string) ([]inventorypublic.Stock, error) {
+	id := "var-STOCK-1"
+	return []inventorypublic.Stock{{ProductID: productID, VariantID: &id, OnHand: 16, Available: 16}}, nil
+}
+func (fakeInventory) Reserve(context.Context, string, []inventorypublic.ReserveLine, time.Duration) error {
+	return nil
+}
+func (fakeInventory) ReleaseByOrder(context.Context, string) error { return nil }
+func (fakeInventory) ConfirmByOrder(context.Context, string) error { return nil }
+func (fakeInventory) ReleaseExpired(context.Context) ([]string, error) {
+	return nil, nil
+}
+
+func newService(repo *fakeRepo) public.Service {
+	return service.NewService(repo, fakeInventory{})
+}
+
 func TestCreate(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("sku uppercased", func(t *testing.T) {
-		svc := service.NewService(newFakeRepo())
+		svc := newService(newFakeRepo())
 		got, err := svc.Create(ctx, public.CreateVariantInput{
 			ProductID: "p1", Name: "500ml", SKU: "oil-500-001", PriceCents: 2500,
 		})
@@ -95,7 +123,7 @@ func TestCreate(t *testing.T) {
 	})
 
 	t.Run("missing product maps to not found", func(t *testing.T) {
-		svc := service.NewService(newFakeRepo())
+		svc := newService(newFakeRepo())
 		_, err := svc.Create(ctx, public.CreateVariantInput{
 			ProductID: "missing-product", Name: "X", SKU: "X-1", PriceCents: 100,
 		})
@@ -105,7 +133,7 @@ func TestCreate(t *testing.T) {
 	})
 
 	t.Run("duplicate sku", func(t *testing.T) {
-		svc := service.NewService(newFakeRepo())
+		svc := newService(newFakeRepo())
 		in := public.CreateVariantInput{ProductID: "p1", Name: "A", SKU: "DUP-1", PriceCents: 100}
 		if _, err := svc.Create(ctx, in); err != nil {
 			t.Fatalf("first: %v", err)
@@ -116,7 +144,7 @@ func TestCreate(t *testing.T) {
 	})
 
 	t.Run("negative price rejected", func(t *testing.T) {
-		svc := service.NewService(newFakeRepo())
+		svc := newService(newFakeRepo())
 		_, err := svc.Create(ctx, public.CreateVariantInput{
 			ProductID: "p1", Name: "A", SKU: "NEG-1", PriceCents: -5,
 		})
@@ -126,9 +154,38 @@ func TestCreate(t *testing.T) {
 	})
 }
 
+func TestListByProductIncludesStock(t *testing.T) {
+	ctx := context.Background()
+	svc := newService(newFakeRepo())
+	if _, err := svc.Create(ctx, public.CreateVariantInput{
+		ProductID: "p1", Name: "L", SKU: "STOCK-1", PriceCents: 14500000,
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	variants, err := svc.ListByProduct(ctx, "p1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(variants) != 1 {
+		t.Fatalf("expected 1 variant, got %d", len(variants))
+	}
+	if variants[0].Available != 16 || !variants[0].InStock {
+		t.Fatalf("stock not attached: %+v", variants[0])
+	}
+
+	updated, err := svc.Update(ctx, variants[0].ID, public.UpdateVariantInput{Name: strptr("XL")})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.Available != 16 || !updated.InStock {
+		t.Fatalf("stock missing from update response: %+v", updated)
+	}
+}
+
 func TestUpdateImmutables(t *testing.T) {
 	ctx := context.Background()
-	svc := service.NewService(newFakeRepo())
+	svc := newService(newFakeRepo())
 	v, err := svc.Create(ctx, public.CreateVariantInput{
 		ProductID: "p1", Name: "500ml", SKU: "IMM-1", PriceCents: 2500,
 	})

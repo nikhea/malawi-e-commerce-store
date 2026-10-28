@@ -18,7 +18,7 @@ import (
 // @securityDefinitions.apikey BearerAuth
 // @in header
 // @name Authorization
-// @description JWT. Prefix with "Bearer ".
+// @description JWT — paste with or without the "Bearer" prefix.
 
 func main() {
 	cfg, err := config.Load()

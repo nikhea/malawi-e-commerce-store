@@ -69,6 +69,31 @@ func (r *Postgres) GetStock(ctx context.Context, productID string, variantID *st
 	return s, nil
 }
 
+// ListStockByProduct returns all stock rows for a product (base row plus
+// per-variant rows). Unknown product = empty list, not an error.
+func (r *Postgres) ListStockByProduct(ctx context.Context, productID string) ([]model.Stock, error) {
+	const q = `SELECT id, product_id, variant_id, on_hand_qty, reserved_qty, created_at, updated_at
+	           FROM inventory WHERE product_id = $1
+	           ORDER BY variant_id NULLS FIRST`
+	rows, err := r.pool.Query(ctx, q, productID)
+	if err != nil {
+		return nil, apperr.Internal(err)
+	}
+	defer rows.Close()
+	out := []model.Stock{}
+	for rows.Next() {
+		var s model.Stock
+		if err := rows.Scan(&s.ID, &s.ProductID, &s.VariantID, &s.OnHand, &s.Reserved, &s.CreatedAt, &s.UpdatedAt); err != nil {
+			return nil, apperr.Internal(err)
+		}
+		out = append(out, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, apperr.Internal(err)
+	}
+	return out, nil
+}
+
 // Reserve locks every line's row, checks availability, bumps reserved,
 // and writes the ledger — atomically. Any short line aborts all of them.
 func (r *Postgres) Reserve(ctx context.Context, orderRef string, lines []model.Reservation, expiresAt time.Time) error {

@@ -90,8 +90,8 @@ func (f *fakeCart) Get(_ context.Context, userID string) (cartpublic.Cart, error
 	if f.empty {
 		return cartpublic.Cart{ID: "cart-1", UserID: "u1", Items: []cartpublic.Line{}}, nil
 	}
-	return cartpublic.Cart{ID: "cart-1", UserID: "u1", Currency: "MWK", SubtotalCents: 2000, Items: []cartpublic.Line{
-		{ID: "l1", ProductID: "p1", Name: "Oil", UnitPriceCents: 1000, Currency: "MWK", Qty: 2, LineTotalCents: 2000},
+	return cartpublic.Cart{ID: "cart-1", UserID: "u1", Currency: "USD", SubtotalCents: 2000, Items: []cartpublic.Line{
+		{ID: "l1", ProductID: "p1", Name: "Oil", UnitPriceCents: 1000, Currency: "USD", Qty: 2, LineTotalCents: 2000},
 	}}, nil
 }
 
@@ -122,6 +122,9 @@ func (f *fakeInventory) SetStock(context.Context, string, *string, int) (invento
 }
 func (f *fakeInventory) GetStock(context.Context, string, *string) (inventorypublic.Stock, error) {
 	return inventorypublic.Stock{}, nil
+}
+func (f *fakeInventory) ListStockByProduct(context.Context, string) ([]inventorypublic.Stock, error) {
+	return nil, nil
 }
 func (f *fakeInventory) Reserve(_ context.Context, orderRef string, _ []inventorypublic.ReserveLine, _ time.Duration) error {
 	if f.failReserve {

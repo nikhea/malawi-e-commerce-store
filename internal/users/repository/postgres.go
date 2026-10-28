@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -61,6 +62,92 @@ func (r *Postgres) GetByID(ctx context.Context, id string) (model.User, error) {
 func (r *Postgres) GetByEmail(ctx context.Context, email string) (model.User, error) {
 	const q = `SELECT ` + userColumns + ` FROM users WHERE email = $1`
 	return scanUser(r.pool.QueryRow(ctx, q, strings.ToLower(email)))
+}
+
+// List returns one page of the admin user directory plus the total
+// matching the same filters.
+func (r *Postgres) List(ctx context.Context, f model.ListFilter) ([]model.User, int64, error) {
+	where, args := userWhere(f)
+
+	countQ := `SELECT COUNT(*) FROM users WHERE ` + where
+	var total int64
+	if err := r.pool.QueryRow(ctx, countQ, args...).Scan(&total); err != nil {
+		return nil, 0, apperr.Internal(err)
+	}
+
+	listArgs := append(append([]any{}, args...), f.Limit, f.Offset)
+	q := `SELECT ` + userColumns + ` FROM users WHERE ` + where +
+		` ORDER BY ` + userOrder(f.Sort) +
+		fmt.Sprintf(` LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2)
+	rows, err := r.pool.Query(ctx, q, listArgs...)
+	if err != nil {
+		return nil, 0, apperr.Internal(err)
+	}
+	defer rows.Close()
+	out := []model.User{}
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, apperr.Internal(err)
+	}
+	return out, total, nil
+}
+
+func userWhere(f model.ListFilter) (string, []any) {
+	clauses := []string{"1 = 1"}
+	args := []any{}
+	add := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+
+	if f.Query != "" {
+		pattern := "%" + escapeLike(f.Query) + "%"
+		n := add(pattern)
+		clauses = append(clauses, fmt.Sprintf(
+			`(lower(email) LIKE lower(%s) ESCAPE '\' OR lower(name) LIKE lower(%s) ESCAPE '\')`,
+			n, n))
+	}
+	if f.Role != "" {
+		clauses = append(clauses, fmt.Sprintf("role = %s", add(f.Role)))
+	}
+	if f.EmailVerified != nil {
+		clauses = append(clauses, fmt.Sprintf("email_verified = %s", add(*f.EmailVerified)))
+	}
+	if f.CreatedAfter != nil {
+		clauses = append(clauses, fmt.Sprintf("created_at >= %s", add(*f.CreatedAfter)))
+	}
+	if f.CreatedBefore != nil {
+		clauses = append(clauses, fmt.Sprintf("created_at <= %s", add(*f.CreatedBefore)))
+	}
+	return strings.Join(clauses, " AND "), args
+}
+
+func userOrder(sortKey string) string {
+	switch sortKey {
+	case "oldest":
+		return "created_at ASC, id ASC"
+	case "name_asc":
+		return "name ASC, id ASC"
+	case "name_desc":
+		return "name DESC, id ASC"
+	case "email_asc":
+		return "email ASC, id ASC"
+	case "email_desc":
+		return "email DESC, id ASC"
+	default: // newest
+		return "created_at DESC, id ASC"
+	}
+}
+
+// escapeLike makes user input literal inside an ILIKE pattern.
+func escapeLike(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
 }
 
 func (r *Postgres) SetRole(ctx context.Context, id, role string) (model.User, error) {

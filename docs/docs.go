@@ -873,6 +873,105 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/users": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Admin user directory: search, role/verification filters and paging.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "List users (admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Search email or name",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "admin|customer",
+                        "name": "role",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Filter by verification state",
+                        "name": "email_verified",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Created at or after (RFC3339 or YYYY-MM-DD)",
+                        "name": "created_after",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Created at or before (RFC3339 or YYYY-MM-DD)",
+                        "name": "created_before",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "newest|oldest|name_asc|name_desc|email_asc|email_desc",
+                        "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "1-based page (wins over offset)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size (default 20, max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page offset",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/public.UserListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/admin/users/{id}/role": {
             "patch": {
                 "security": [
@@ -1632,7 +1731,7 @@ const docTemplate = `{
         },
         "/categories": {
             "get": {
-                "description": "Public storefront taxonomy, flat and ordered by name.",
+                "description": "Public storefront taxonomy, flat and ordered by name.\nShips {\"data\": [rows], \"meta\": {page, limit, offset, total, total_pages, has_next, has_prev}}.",
                 "produces": [
                     "application/json"
                 ],
@@ -1640,14 +1739,67 @@ const docTemplate = `{
                     "categories"
                 ],
                 "summary": "List categories",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Search name, description or slug",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Only children of this category",
+                        "name": "parent_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Only root categories",
+                        "name": "root_only",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Only categories with active products (false = empty only)",
+                        "name": "has_products",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "name_asc|name_desc|newest|oldest|product_count_asc|product_count_desc",
+                        "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "1-based page (wins over offset)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size (default 20, max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page offset",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/public.Category"
-                            }
+                            "$ref": "#/definitions/public.CategoryListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
                         }
                     }
                 }
@@ -1902,7 +2054,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Validates ownership, converts the MWK total, reuses pending intents.",
+                "description": "Validates ownership, converts legacy MWK totals to USD, reuses pending intents.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1960,7 +2112,7 @@ const docTemplate = `{
         },
         "/products": {
             "get": {
-                "description": "Lightweight catalog rows (no variants — fetch Detail per product).",
+                "description": "Lightweight catalog rows (no variants — fetch Detail per product).\nShips {\"data\": [rows], \"meta\": {page, limit, offset, total, total_pages, has_next, has_prev}}.",
                 "produces": [
                     "application/json"
                 ],
@@ -1971,14 +2123,80 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Filter by category",
+                        "description": "Search name, description or slug",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by category UUID",
                         "name": "category_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by category slug",
+                        "name": "category_slug",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Minimum price in USD cents",
+                        "name": "min_price_cents",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum price in USD cents",
+                        "name": "max_price_cents",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Only products with sellable stock (false = out of stock only)",
+                        "name": "in_stock",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Variant size name, e.g. XS, M, XL",
+                        "name": "size",
+                        "in": "query"
+                    },
+                    {
+                        "type": "number",
+                        "description": "Minimum average review rating (0-5)",
+                        "name": "min_rating",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Created at or after (RFC3339 or YYYY-MM-DD)",
+                        "name": "created_after",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Created at or before (RFC3339 or YYYY-MM-DD)",
+                        "name": "created_before",
                         "in": "query"
                     },
                     {
                         "type": "boolean",
                         "description": "Hide inactive (default true)",
                         "name": "active_only",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "name_asc|name_desc|price_asc|price_desc|newest|oldest|rating_asc|rating_desc",
+                        "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "1-based page (wins over offset)",
+                        "name": "page",
                         "in": "query"
                     },
                     {
@@ -1998,10 +2216,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/public.Product"
-                            }
+                            "$ref": "#/definitions/public.ProductListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
                         }
                     }
                 }
@@ -2735,7 +2956,7 @@ const docTemplate = `{
                 },
                 "currency": {
                     "type": "string",
-                    "example": "MWK"
+                    "example": "USD"
                 },
                 "description": {
                     "type": "string",
@@ -3062,12 +3283,45 @@ const docTemplate = `{
                 }
             }
         },
+        "pagination.Meta": {
+            "type": "object",
+            "properties": {
+                "has_next": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "has_prev": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "limit": {
+                    "type": "integer",
+                    "example": 20
+                },
+                "offset": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "page": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "total": {
+                    "type": "integer",
+                    "example": 50
+                },
+                "total_pages": {
+                    "type": "integer",
+                    "example": 3
+                }
+            }
+        },
         "public.Cart": {
             "type": "object",
             "properties": {
                 "currency": {
                     "type": "string",
-                    "example": "MWK"
+                    "example": "USD"
                 },
                 "id": {
                     "type": "string"
@@ -3120,6 +3374,20 @@ const docTemplate = `{
                 }
             }
         },
+        "public.CategoryListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.Category"
+                    }
+                },
+                "meta": {
+                    "$ref": "#/definitions/pagination.Meta"
+                }
+            }
+        },
         "public.Detail": {
             "type": "object",
             "properties": {
@@ -3153,7 +3421,7 @@ const docTemplate = `{
             "properties": {
                 "currency": {
                     "type": "string",
-                    "example": "MWK"
+                    "example": "USD"
                 },
                 "id": {
                     "type": "string"
@@ -3194,7 +3462,7 @@ const docTemplate = `{
                 },
                 "currency": {
                     "type": "string",
-                    "example": "MWK"
+                    "example": "USD"
                 },
                 "id": {
                     "type": "string"
@@ -3294,7 +3562,7 @@ const docTemplate = `{
                 },
                 "currency": {
                     "type": "string",
-                    "example": "MWK"
+                    "example": "USD"
                 },
                 "description": {
                     "type": "string",
@@ -3324,12 +3592,26 @@ const docTemplate = `{
                 }
             }
         },
+        "public.ProductListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.Product"
+                    }
+                },
+                "meta": {
+                    "$ref": "#/definitions/pagination.Meta"
+                }
+            }
+        },
         "public.ProductSummary": {
             "type": "object",
             "properties": {
                 "currency": {
                     "type": "string",
-                    "example": "MWK"
+                    "example": "USD"
                 },
                 "id": {
                     "type": "string"
@@ -3503,15 +3785,38 @@ const docTemplate = `{
                 }
             }
         },
+        "public.UserListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.User"
+                    }
+                },
+                "meta": {
+                    "$ref": "#/definitions/pagination.Meta"
+                }
+            }
+        },
         "public.Variant": {
             "type": "object",
             "properties": {
+                "available": {
+                    "description": "Available is on-hand minus active reservations: the number a\nshopper can add to the cart right now. Zero for a brand-new SKU\nuntil an admin sets stock.",
+                    "type": "integer",
+                    "example": 16
+                },
                 "created_at": {
                     "type": "string"
                 },
                 "id": {
                     "type": "string",
                     "example": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                },
+                "in_stock": {
+                    "type": "boolean",
+                    "example": true
                 },
                 "is_active": {
                     "type": "boolean"
@@ -3536,8 +3841,16 @@ const docTemplate = `{
         "public.VariantView": {
             "type": "object",
             "properties": {
+                "available": {
+                    "type": "integer",
+                    "example": 16
+                },
                 "id": {
                     "type": "string"
+                },
+                "in_stock": {
+                    "type": "boolean",
+                    "example": true
                 },
                 "is_active": {
                     "type": "boolean"
@@ -3584,7 +3897,7 @@ const docTemplate = `{
     },
     "securityDefinitions": {
         "BearerAuth": {
-            "description": "JWT. Prefix with \"Bearer \".",
+            "description": "JWT — paste with or without the \"Bearer\" prefix.",
             "type": "apiKey",
             "name": "Authorization",
             "in": "header"

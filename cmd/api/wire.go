@@ -84,10 +84,10 @@ type app struct {
 func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, error) {
 	usersSvc := users.Wire(pool)
 	categoriesSvc := categories.Wire(pool)
-	variantsSvc := variants.Wire(pool)
+	inventorySvc := inventory.Wire(pool)
+	variantsSvc := variants.Wire(pool, inventorySvc)
 	productsSvc := products.Wire(pool, categoriesSvc, variantsSvc)
 	cartSvc := cart.Wire(pool, productsSvc, usersSvc)
-	inventorySvc := inventory.Wire(pool)
 
 	// Redis backs rate limiting only. Fail-open by design: a dead Redis
 	// disables throttling (loudly) instead of taking the shop down.
@@ -277,6 +277,8 @@ func registerRoutes(r *gin.Engine, a *app) {
 	// Generated API docs (docs/ is committed; refresh with
 	// `swag init -g cmd/api/main.go --parseInternal -o docs`).
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerfiles.Handler))
+	// Dark reference UI (Scalar, CDN). Offline? Use /swagger instead.
+	registerScalarDocs(r)
 }
 
 // newServer builds the HTTP server with production timeouts: header reads

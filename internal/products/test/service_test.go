@@ -3,6 +3,7 @@ package test
 import (
 	"context"
 	"testing"
+	"time"
 
 	categoriespublic "github.com/nikhea/malawi-e-commerce-store/internal/categories/public"
 	"github.com/nikhea/malawi-e-commerce-store/internal/products/model"
@@ -14,8 +15,9 @@ import (
 
 // fakeRepo is an in-memory product store. No real DB.
 type fakeRepo struct {
-	byID   map[string]model.Product
-	bySlug map[string]string
+	byID       map[string]model.Product
+	bySlug     map[string]string
+	lastFilter model.ListFilter
 }
 
 func newFakeRepo(seed ...model.Product) *fakeRepo {
@@ -54,12 +56,13 @@ func (f *fakeRepo) GetBySlug(_ context.Context, slug string) (model.Product, err
 	return f.byID[id], nil
 }
 
-func (f *fakeRepo) List(_ context.Context, _ *string, _ bool, _, _ int) ([]model.Product, error) {
+func (f *fakeRepo) List(_ context.Context, filter model.ListFilter) ([]model.Product, int64, error) {
+	f.lastFilter = filter
 	out := []model.Product{}
 	for _, p := range f.byID {
 		out = append(out, p)
 	}
-	return out, nil
+	return out, int64(len(out)), nil
 }
 
 func (f *fakeRepo) Update(_ context.Context, p model.Product) (model.Product, error) {
@@ -104,7 +107,9 @@ func (fakeCategories) GetByID(_ context.Context, id string) (categoriespublic.Ca
 func (fakeCategories) GetBySlug(context.Context, string) (categoriespublic.Category, error) {
 	return categoriespublic.Category{}, apperr.NotFound("category not found")
 }
-func (fakeCategories) List(context.Context) ([]categoriespublic.Category, error) { return nil, nil }
+func (fakeCategories) List(context.Context, categoriespublic.ListFilter) (categoriespublic.Page, error) {
+	return categoriespublic.Page{}, nil
+}
 func (fakeCategories) Update(context.Context, string, categoriespublic.UpdateCategoryInput) (categoriespublic.Category, error) {
 	return categoriespublic.Category{}, nil
 }
@@ -121,7 +126,10 @@ func (fakeVariants) Create(context.Context, variantspublic.CreateVariantInput) (
 }
 func (fakeVariants) ListByProduct(_ context.Context, productID string) ([]variantspublic.Variant, error) {
 	if productID == "prod-oil" {
-		return []variantspublic.Variant{{ID: "v1", ProductID: "prod-oil", Name: "500ml", SKU: "OIL-500", PriceCents: 2500, IsActive: true}}, nil
+		return []variantspublic.Variant{{
+			ID: "v1", ProductID: "prod-oil", Name: "500ml", SKU: "OIL-500",
+			PriceCents: 2500, IsActive: true, Available: 16, InStock: true,
+		}}, nil
 	}
 	return []variantspublic.Variant{}, nil
 }
@@ -145,7 +153,7 @@ func TestMoneyAndCategory(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create: %v", err)
 		}
-		if p.PriceCents != 12500 || p.Currency != "MWK" || p.Slug != "sunseed-2l" {
+		if p.PriceCents != 12500 || p.Currency != "USD" || p.Slug != "sunseed-2l" {
 			t.Fatalf("bad product: %+v", p)
 		}
 	})
@@ -179,6 +187,125 @@ func TestDetailComposesVariants(t *testing.T) {
 	if d.Product.ID != "prod-oil" || len(d.Variants) != 1 || d.Variants[0].SKU != "OIL-500" {
 		t.Fatalf("bad detail: %+v", d)
 	}
+	if d.Variants[0].Available != 16 || !d.Variants[0].InStock {
+		t.Fatalf("variant stock not composed: %+v", d.Variants[0])
+	}
 }
 
-func strptr(s string) *string { return &s }
+func strptr(s string) *string   { return &s }
+func i64ptr(v int64) *int64     { return &v }
+func f64ptr(v float64) *float64 { return &v }
+
+func TestListPaginationAndFilters(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo(
+		model.Product{ID: "p1", Name: "Alpha", Slug: "alpha", PriceCents: 100},
+		model.Product{ID: "p2", Name: "Beta", Slug: "beta", PriceCents: 200},
+	)
+	svc := service.NewService(repo, fakeCategories{}, fakeVariants{})
+
+	t.Run("defaults to first page of 20", func(t *testing.T) {
+		page, err := svc.List(ctx, public.ListFilter{ActiveOnly: true})
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		if page.Meta.Page != 1 || page.Meta.Limit != 20 || page.Meta.Offset != 0 || page.Meta.Total != 2 {
+			t.Fatalf("bad meta: %+v", page.Meta)
+		}
+		if page.Meta.TotalPages != 1 || page.Meta.HasNext || page.Meta.HasPrev {
+			t.Fatalf("bad flags: %+v", page.Meta)
+		}
+		if repo.lastFilter.Sort != "name_asc" || !repo.lastFilter.ActiveOnly {
+			t.Fatalf("bad repo filter: %+v", repo.lastFilter)
+		}
+	})
+
+	t.Run("page converts to offset and beats offset", func(t *testing.T) {
+		page, err := svc.List(ctx, public.ListFilter{Page: 3, Limit: 10, Offset: 99})
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		if repo.lastFilter.Offset != 20 || page.Meta.Offset != 20 || page.Meta.Page != 3 {
+			t.Fatalf("page not applied: meta=%+v filter=%+v", page.Meta, repo.lastFilter)
+		}
+		if page.Meta.HasPrev != true {
+			t.Fatalf("expected has_prev")
+		}
+	})
+
+	t.Run("limit is capped", func(t *testing.T) {
+		page, err := svc.List(ctx, public.ListFilter{Limit: 500})
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		if page.Meta.Limit != 100 || repo.lastFilter.Limit != 100 {
+			t.Fatalf("limit not capped: %+v", page.Meta)
+		}
+	})
+
+	t.Run("filters are trimmed and forwarded", func(t *testing.T) {
+		after := time.Now().Add(-time.Hour)
+		before := time.Now()
+		_, err := svc.List(ctx, public.ListFilter{
+			Query: "  dress  ", CategoryID: strptr("  "), CategorySlug: strptr(" dresses "),
+			MinPriceCents: i64ptr(1000), MaxPriceCents: i64ptr(5000),
+			InStock: boolptr(true), Size: " xl ", MinRating: f64ptr(4),
+			CreatedAfter: &after, CreatedBefore: &before, Sort: "price_desc",
+		})
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		f := repo.lastFilter
+		if f.Query != "dress" || f.CategoryID != nil || f.CategorySlug == nil || *f.CategorySlug != "dresses" {
+			t.Fatalf("bad text filters: %+v", f)
+		}
+		if f.Size != "xl" || f.MinRating == nil || *f.MinRating != 4 || f.InStock == nil || !*f.InStock {
+			t.Fatalf("bad typed filters: %+v", f)
+		}
+		if f.Sort != "price_desc" || f.MinPriceCents == nil || f.MaxPriceCents == nil {
+			t.Fatalf("bad sort/price: %+v", f)
+		}
+	})
+
+	t.Run("zero rating means no floor", func(t *testing.T) {
+		_, err := svc.List(ctx, public.ListFilter{MinRating: f64ptr(0)})
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		if repo.lastFilter.MinRating != nil {
+			t.Fatalf("expected nil rating, got %v", *repo.lastFilter.MinRating)
+		}
+	})
+}
+
+func TestListValidation(t *testing.T) {
+	ctx := context.Background()
+	svc := service.NewService(newFakeRepo(), fakeCategories{}, fakeVariants{})
+	after := time.Now()
+	before := after.Add(-time.Hour)
+
+	cases := []struct {
+		name string
+		in   public.ListFilter
+	}{
+		{"negative limit", public.ListFilter{Limit: -1}},
+		{"negative offset", public.ListFilter{Offset: -1}},
+		{"negative page", public.ListFilter{Page: -1}},
+		{"negative min price", public.ListFilter{MinPriceCents: i64ptr(-1)}},
+		{"negative max price", public.ListFilter{MaxPriceCents: i64ptr(-1)}},
+		{"inverted price range", public.ListFilter{MinPriceCents: i64ptr(5), MaxPriceCents: i64ptr(1)}},
+		{"rating above five", public.ListFilter{MinRating: f64ptr(5.1)}},
+		{"rating below zero", public.ListFilter{MinRating: f64ptr(-0.1)}},
+		{"inverted dates", public.ListFilter{CreatedAfter: &after, CreatedBefore: &before}},
+		{"unknown sort", public.ListFilter{Sort: "drop table products"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := svc.List(ctx, tc.in); apperr.CodeOf(err) != apperr.CodeValidation {
+				t.Fatalf("expected VALIDATION_ERROR, got %v", err)
+			}
+		})
+	}
+}
+
+func boolptr(v bool) *bool { return &v }

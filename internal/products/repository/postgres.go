@@ -94,36 +94,131 @@ func (r *Postgres) GetBySlug(ctx context.Context, slug string) (model.Product, e
 	return scanProduct(r.pool.QueryRow(ctx, q, strings.ToLower(slug)))
 }
 
-func (r *Postgres) List(ctx context.Context, categoryID *string, activeOnly bool, limit, offset int) ([]model.Product, error) {
-	q := `SELECT ` + productColumns + ` ` + productFrom + ` WHERE 1 = 1`
-	args := []any{}
-	if activeOnly {
-		q += ` AND p.is_active`
-	}
-	if categoryID != nil {
-		args = append(args, *categoryID)
-		q += fmt.Sprintf(` AND p.category_id = $%d`, len(args))
-	}
-	args = append(args, limit, offset)
-	q += fmt.Sprintf(` ORDER BY p.name LIMIT $%d OFFSET $%d`, len(args)-1, len(args))
+// List returns one page plus the total number of rows matching the same
+// filters. The count runs separately so an empty page still carries an
+// accurate total.
+func (r *Postgres) List(ctx context.Context, f model.ListFilter) ([]model.Product, int64, error) {
+	where, args := productWhere(f)
 
-	rows, err := r.pool.Query(ctx, q, args...)
+	countQ := `SELECT COUNT(*) ` + productFrom + ` WHERE ` + where
+	var total int64
+	if err := r.pool.QueryRow(ctx, countQ, args...).Scan(&total); err != nil {
+		return nil, 0, apperr.Internal(err)
+	}
+
+	listArgs := append(append([]any{}, args...), f.Limit, f.Offset)
+	q := `SELECT ` + productColumns + ` ` + productFrom + ` WHERE ` + where +
+		` ORDER BY ` + productOrder(f.Sort) +
+		fmt.Sprintf(` LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2)
+
+	rows, err := r.pool.Query(ctx, q, listArgs...)
 	if err != nil {
-		return nil, apperr.Internal(err)
+		return nil, 0, apperr.Internal(err)
 	}
 	defer rows.Close()
 	out := []model.Product{}
 	for rows.Next() {
 		p, err := scanProduct(rows)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		out = append(out, p)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, apperr.Internal(err)
+		return nil, 0, apperr.Internal(err)
 	}
-	return out, nil
+	return out, total, nil
+}
+
+// productWhere translates the validated filter into a parameterized
+// predicate. Values never reach the SQL string; only placeholders do.
+func productWhere(f model.ListFilter) (string, []any) {
+	clauses := []string{"1 = 1"}
+	args := []any{}
+	add := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+
+	if f.ActiveOnly {
+		clauses = append(clauses, "p.is_active")
+	}
+	if f.Query != "" {
+		pattern := "%" + escapeLike(f.Query) + "%"
+		n := add(pattern)
+		// lower() mirrors the trigram indexes in 0014; ILIKE alone would
+		// not match an index on lower(column).
+		clauses = append(clauses, fmt.Sprintf(
+			`(lower(p.name) LIKE lower(%s) ESCAPE '\' OR lower(p.description) LIKE lower(%s) ESCAPE '\' OR lower(p.slug) LIKE lower(%s) ESCAPE '\')`,
+			n, n, n))
+	}
+	if f.CategoryID != nil {
+		clauses = append(clauses, fmt.Sprintf("p.category_id = %s", add(*f.CategoryID)))
+	}
+	if f.CategorySlug != nil {
+		clauses = append(clauses, fmt.Sprintf("lower(c.slug) = lower(%s)", add(*f.CategorySlug)))
+	}
+	if f.MinPriceCents != nil {
+		clauses = append(clauses, fmt.Sprintf("p.price_cents >= %s", add(*f.MinPriceCents)))
+	}
+	if f.MaxPriceCents != nil {
+		clauses = append(clauses, fmt.Sprintf("p.price_cents <= %s", add(*f.MaxPriceCents)))
+	}
+	if f.InStock != nil {
+		const stocked = `EXISTS (SELECT 1 FROM inventory i
+			WHERE i.product_id = p.id AND i.on_hand_qty - i.reserved_qty > 0)`
+		if *f.InStock {
+			clauses = append(clauses, stocked)
+		} else {
+			clauses = append(clauses, "NOT "+stocked)
+		}
+	}
+	if f.Size != "" {
+		clauses = append(clauses, fmt.Sprintf(
+			`EXISTS (SELECT 1 FROM variants v WHERE v.product_id = p.id
+			 AND v.is_active AND lower(v.name) = lower(%s))`, add(f.Size)))
+	}
+	if f.MinRating != nil {
+		clauses = append(clauses, fmt.Sprintf(
+			`EXISTS (SELECT 1 FROM reviews r WHERE r.product_id = p.id
+			 GROUP BY r.product_id HAVING AVG(r.rating) >= %s)`, add(*f.MinRating)))
+	}
+	if f.CreatedAfter != nil {
+		clauses = append(clauses, fmt.Sprintf("p.created_at >= %s", add(*f.CreatedAfter)))
+	}
+	if f.CreatedBefore != nil {
+		clauses = append(clauses, fmt.Sprintf("p.created_at <= %s", add(*f.CreatedBefore)))
+	}
+	return strings.Join(clauses, " AND "), args
+}
+
+// productOrder is a closed whitelist: never interpolate a client sort
+// string. Every order ends with p.id so equal keys stay deterministic
+// across pages.
+func productOrder(sortKey string) string {
+	switch sortKey {
+	case "name_desc":
+		return "p.name DESC, p.id ASC"
+	case "price_asc":
+		return "p.price_cents ASC, p.name ASC, p.id ASC"
+	case "price_desc":
+		return "p.price_cents DESC, p.name ASC, p.id ASC"
+	case "newest":
+		return "p.created_at DESC, p.id ASC"
+	case "oldest":
+		return "p.created_at ASC, p.id ASC"
+	case "rating_desc":
+		return "(SELECT AVG(r.rating) FROM reviews r WHERE r.product_id = p.id) DESC NULLS LAST, p.name ASC, p.id ASC"
+	case "rating_asc":
+		return "(SELECT AVG(r.rating) FROM reviews r WHERE r.product_id = p.id) ASC NULLS LAST, p.name ASC, p.id ASC"
+	default: // name_asc
+		return "p.name ASC, p.id ASC"
+	}
+}
+
+// escapeLike makes user input literal inside an ILIKE pattern.
+func escapeLike(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
 }
 
 func (r *Postgres) Update(ctx context.Context, p model.Product) (model.Product, error) {
