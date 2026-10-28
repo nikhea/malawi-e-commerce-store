@@ -5,10 +5,10 @@ dependencies — plain `fetch` — so it runs in Node 18+, Next.js, Vite, and br
 
 - **Auth** — register, login, rotating refresh, email verification, password reset
 - **Catalog** — categories, products (SPU), variants (SKU), reviews
-- **Cart → Orders → Payments** — cart lines, checkout, Stripe PaymentIntents (MWK→USD)
+- **Cart → Orders → Payments** — cart lines, checkout, Stripe PaymentIntents (USD)
 - **Wishlist** — idempotent hearts
 - **Admin** — categories/products/variants writes, inventory, user roles, review moderation
-- **Malawi helpers** — MWK/tambala money math, the 28 districts by region
+- **Money helpers** — USD cents, legacy MWK converters, the 28 districts by region
 
 ## Install
 
@@ -19,7 +19,7 @@ npm install @nikhea/malawi-store-sdk
 ## Quick start
 
 ```ts
-import { MalawiStoreClient, formatMWK } from "@nikhea/malawi-store-sdk";
+import { MalawiStoreClient, formatUSD } from "@nikhea/malawi-store-sdk";
 
 const store = new MalawiStoreClient({
   baseUrl: "https://api.mystore.mw", // default http://localhost:8080
@@ -38,7 +38,7 @@ store.setToken(token);
 await store.wishlist.add(productId);
 
 const cart = await store.cart.add({ product_id, qty: 2 });
-console.log(`Subtotal: ${formatMWK(cart.subtotal_cents)}`);
+console.log(`Subtotal: ${formatUSD(cart.subtotal_cents)}`);
 
 const order = await store.orders.checkout();
 const payment = await store.payments.createIntent({ order_id: order.id });
@@ -89,22 +89,28 @@ Every variant (both `/products/:id` detail and `/products/:id/variants`) now
 carries `available` (on-hand minus reservations) and `in_stock`, so size
 pickers can disable sold-out options without extra calls.
 
-### Prices are minor units (MWK tambala)
+### Prices are USD cents
 
-`12500` = **K125.00**. Helpers included:
+`12500` = **$125.00**. Every catalog, cart and new-order amount is USD cents.
+Helpers included:
 
 ```ts
-import { mwk, toKwacha, formatMWK, districtsByRegion } from "@nikhea/malawi-store-sdk";
+import { usd, toUsd, formatUSD, districtsByRegion } from "@nikhea/malawi-store-sdk";
 
-mkw === mwk(125);           // 12500
-formatMWK(12500);           // "K125.00"
+usd(125);                   // 12500
+toUsd(12500);               // 125
+formatUSD(12500);           // "$125.00"
 districtsByRegion("Southern").map(d => d.name); // Blantyre, Zomba, …
 ```
+
+Historical orders may still carry MWK tambala. The legacy helpers
+(`mwk`, `toKwacha`, `formatMWK`, `mwkCentsToUsdCents`, `MWK_PER_USD`) remain
+exported for those snapshots; new code should use the USD helpers.
 
 ### Admin
 
 ```ts
-store.products.adminCreate({ name: "Nkhata Bay Chilli", price_cents: 350000, currency: "MWK" });
+store.products.adminCreate({ name: "Nkhata Bay Chilli", price_cents: 350000, currency: "USD" });
 store.variants.adminCreate(productId, { name: "500g", sku: "NB-CHILLI-500", price_cents: 350000 });
 store.inventory.setStock({ product_id, qty: 40 });
 const form = new FormData();

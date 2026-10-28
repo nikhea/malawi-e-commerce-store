@@ -141,7 +141,7 @@ export type ProductSort =
   | "rating_asc"
   | "rating_desc";
 
-/** Minor units: MWK tambala (12500 = K125.00). */
+/** Prices are USD cents (12500 = $125.00). */
 export type ListProductsParams = {
   /** Case-insensitive substring over name, description and slug. */
   q?: string;
@@ -201,7 +201,7 @@ export type CreateProductInput = {
   name: string;
   slug?: string;
   description?: string;
-  /** Absolute minor units per base SKU (tambala). */
+  /** Absolute USD cents per base SKU (12500 = $125.00). */
   price_cents: number;
   currency?: string;
   image_url?: string;
@@ -233,7 +233,7 @@ export type Variant = {
 export type CreateVariantInput = {
   name: string;
   sku: string;
-  /** Absolute minor units (tambala), not a price delta. */
+  /** Absolute USD cents, not a price delta. */
   price_cents: number;
 };
 
@@ -363,10 +363,10 @@ export type Payment = {
   order_id: string;
   stripe_intent_id: string;
   client_secret: string;
-  /** USD cents actually charged (MWK→USD conversion on the server). */
+  /** USD cents actually charged; legacy MWK orders convert server-side. */
   amount_cents: number;
   currency: string;
-  /** Source order amount in MWK tambala. */
+  /** Source order total in its own minor units (USD cents, or tambala for legacy MWK orders). */
   order_amount_cents: number;
   status: PaymentStatus;
   created_at: string;

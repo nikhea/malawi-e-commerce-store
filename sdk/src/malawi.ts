@@ -1,13 +1,39 @@
 /**
- * Malawi-specific commerce helpers: MWK money, administrative districts.
+ * Money helpers and Malawi administrative districts. The store prices the
+ * catalog, cart and new orders in USD; MWK helpers remain for legacy order
+ * amounts and value-preserving conversions.
  * Zero dependencies (mirrors the zero-dependency SDK contract).
  */
 
 // ---------------------------------------------------------------------------
-// Money — the API stores minor units ("price_cents" = MWK tambala)
+// Money — the API stores minor units ("price_cents" = USD cents)
 // ---------------------------------------------------------------------------
 
-/** Server default (FX_MWK_PER_USD = 1700) used for MWK→USD intent conversion. */
+/** USD ISO code. Catalog, cart and new orders are priced in USD. */
+export const CURRENCY_USD = "USD";
+
+/** Dollars (e.g. 85.29) → USD cents (8529). */
+export function usd(dollars: number): number {
+  if (!Number.isFinite(dollars)) throw new TypeError(`usd() expects a finite number, got ${dollars}`);
+  return Math.round(dollars * 100);
+}
+
+/** USD cents (8529) → dollars (85.29). */
+export function toUsd(cents: number): number {
+  return cents / 100;
+}
+
+/** "$85.29" display string from USD cents. */
+export function formatUSD(cents: number): string {
+  if (!Number.isFinite(cents)) throw new TypeError(`formatUSD() expects a finite number, got ${cents}`);
+  return `$${toUsd(cents).toFixed(2)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Legacy MWK — historical orders and value-preserving conversions
+// ---------------------------------------------------------------------------
+
+/** Server default (FX_MWK_PER_USD = 1700) used for legacy MWK→USD conversion. */
 export const MWK_PER_USD = 1_700;
 
 /** MWK ISO code. */

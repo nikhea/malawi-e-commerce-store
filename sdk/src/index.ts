@@ -4,14 +4,18 @@ export { ApiError, type ErrorCode } from "./errors";
 export * from "./types";
 export {
   CURRENCY_MWK,
+  CURRENCY_USD,
   MWK_PER_USD,
   districts,
   districtsByRegion,
   findDistrict,
   formatMWK,
+  formatUSD,
   mwk,
   mwkCentsToUsdCents,
   toKwacha,
+  toUsd,
+  usd,
   type District,
   type Region,
 } from "./malawi";
