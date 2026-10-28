@@ -132,6 +132,10 @@ func (f *fakeGateway) CreateIntent(_ context.Context, amountCents int64, currenc
 	return gateway.Intent{ID: "pi-test", ClientSecret: "secret-test"}, nil
 }
 
+func (f *fakeGateway) CreateCheckoutSession(_ context.Context, amountCents int64, currency, orderID, successURL, cancelURL string) (gateway.CheckoutSession, error) {
+	return gateway.CheckoutSession{ID: "cs-test", URL: "https://checkout.stripe.test/cs-test", ExpiresAt: 1}, nil
+}
+
 func (f *fakeGateway) VerifyWebhook(payload []byte, sig, _ string) (gateway.WebhookEvent, error) {
 	return f.verify(payload, sig)
 }

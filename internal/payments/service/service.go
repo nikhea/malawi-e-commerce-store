@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"strings"
 
@@ -35,6 +36,7 @@ type Repository interface {
 type Config struct {
 	WebhookSecret string
 	FXMWKPerUSD   float64
+	FrontendURL   string
 }
 
 type service struct {
@@ -43,6 +45,7 @@ type service struct {
 	gw     gateway.Gateway
 	secret string
 	fxRate float64
+	frontendURL string
 	notify Notifier
 }
 
@@ -58,7 +61,7 @@ func NewService(repo Repository, orders orderspublic.Service, gw gateway.Gateway
 	if rate <= 0 {
 		rate = 1700
 	}
-	return &service{repo: repo, orders: orders, gw: gw, secret: cfg.WebhookSecret, fxRate: rate, notify: notify}
+	return &service{repo: repo, orders: orders, gw: gw, secret: cfg.WebhookSecret, fxRate: rate, frontendURL: cfg.FrontendURL, notify: notify}
 }
 
 // toChargeCents converts an order total to the USD cents Stripe bills.
@@ -127,6 +130,37 @@ func (s *service) CreateIntent(ctx context.Context, userID, orderID string) (pub
 	return toPublic(p), nil
 }
 
+func (s *service) CreateCheckoutSession(ctx context.Context, userID, orderID string) (public.CheckoutSession, error) {
+	if strings.TrimSpace(orderID) == "" {
+		return public.CheckoutSession{}, apperr.Validation("order id is required")
+	}
+	order, err := s.orders.GetByID(ctx, userID, orderID)
+	if err != nil {
+		return public.CheckoutSession{}, err
+	}
+	if order.Status != orderspublic.StatusPending {
+		return public.CheckoutSession{}, apperr.Conflict("order is not pending")
+	}
+	usd, err := toChargeCents(order.SubtotalCents, order.Currency, s.fxRate)
+	if err != nil {
+		return public.CheckoutSession{}, err
+	}
+	if usd < stripeMinCents {
+		return public.CheckoutSession{}, apperr.Validation("order total is below the minimum charge")
+	}
+	frontend := strings.TrimRight(s.frontendURL, "/")
+	if frontend == "" {
+		return public.CheckoutSession{}, apperr.Internal(fmt.Errorf("frontend URL is not configured"))
+	}
+	cs, err := s.gw.CreateCheckoutSession(ctx, usd, chargeCurrency, orderID,
+		frontend+"/orders/"+orderID+"/payment/success",
+		frontend+"/orders/"+orderID+"/payment/cancel")
+	if err != nil {
+		return public.CheckoutSession{}, apperr.Internal(err)
+	}
+	return public.CheckoutSession{ID: cs.ID, OrderID: orderID, URL: cs.URL, ExpiresAt: cs.ExpiresAt}, nil
+}
+
 func (s *service) HandleWebhook(ctx context.Context, payload []byte, sigHeader string) error {
 	if len(payload) == 0 || strings.TrimSpace(sigHeader) == "" {
 		return apperr.Validation("invalid webhook")
@@ -138,6 +172,19 @@ func (s *service) HandleWebhook(ctx context.Context, payload []byte, sigHeader s
 	}
 
 	switch evt.Type {
+	case "checkout.session.completed", "checkout.session.async_payment_succeeded":
+		if evt.OrderRef == "" || (evt.Type == "checkout.session.completed" && evt.PaymentStatus != "paid") {
+			return nil
+		}
+		// Hosted Checkout sessions do not create a local payment-intent row
+		// until payment is attempted. The signed Stripe event carries the
+		// authenticated order metadata, so settle the order directly.
+		return s.orders.MarkPaid(ctx, evt.OrderRef)
+	case "checkout.session.async_payment_failed":
+		if evt.OrderRef == "" {
+			return nil
+		}
+		return s.orders.CancelByRef(ctx, evt.OrderRef)
 	case "payment_intent.succeeded":
 		return s.settle(ctx, evt, public.StatusSucceeded,
 			func(ctx context.Context, ref string) error {

@@ -2123,7 +2123,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Search name, description or slug",
+                        "description": "Full-text search over name, description and slug (word prefixes; substring fallback)",
                         "name": "q",
                         "in": "query"
                     },
@@ -2189,7 +2189,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "name_asc|name_desc|price_asc|price_desc|newest|oldest|rating_asc|rating_desc",
+                        "description": "name_asc|name_desc|price_asc|price_desc|newest|oldest|rating_asc|rating_desc|relevance (default relevance when q is set)",
                         "name": "sort",
                         "in": "query"
                     },

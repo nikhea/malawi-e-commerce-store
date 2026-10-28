@@ -220,6 +220,26 @@ func TestListPaginationAndFilters(t *testing.T) {
 		}
 	})
 
+	t.Run("query defaults to relevance", func(t *testing.T) {
+		_, err := svc.List(ctx, public.ListFilter{Query: "  oil  "})
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		if repo.lastFilter.Sort != "relevance" || repo.lastFilter.Query != "oil" {
+			t.Fatalf("bad search filter: %+v", repo.lastFilter)
+		}
+	})
+
+	t.Run("explicit sort wins over query default", func(t *testing.T) {
+		_, err := svc.List(ctx, public.ListFilter{Query: "oil", Sort: "price_asc"})
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		if repo.lastFilter.Sort != "price_asc" {
+			t.Fatalf("explicit sort lost: %+v", repo.lastFilter)
+		}
+	})
+
 	t.Run("page converts to offset and beats offset", func(t *testing.T) {
 		page, err := svc.List(ctx, public.ListFilter{Page: 3, Limit: 10, Offset: 99})
 		if err != nil {
@@ -298,6 +318,7 @@ func TestListValidation(t *testing.T) {
 		{"rating below zero", public.ListFilter{MinRating: f64ptr(-0.1)}},
 		{"inverted dates", public.ListFilter{CreatedAfter: &after, CreatedBefore: &before}},
 		{"unknown sort", public.ListFilter{Sort: "drop table products"}},
+		{"relevance without query", public.ListFilter{Sort: "relevance"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

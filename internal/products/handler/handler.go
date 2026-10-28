@@ -34,7 +34,7 @@ func New(svc public.Service, media mediapublic.Service) *Handler {
 // @Description Ships {"data": [rows], "meta": {page, limit, offset, total, total_pages, has_next, has_prev}}.
 // @Tags products
 // @Produce json
-// @Param q query string false "Search name, description or slug"
+// @Param q query string false "Full-text search over name, description and slug (word prefixes; substring fallback)"
 // @Param category_id query string false "Filter by category UUID"
 // @Param category_slug query string false "Filter by category slug"
 // @Param min_price_cents query int false "Minimum price in USD cents"
@@ -45,7 +45,7 @@ func New(svc public.Service, media mediapublic.Service) *Handler {
 // @Param created_after query string false "Created at or after (RFC3339 or YYYY-MM-DD)"
 // @Param created_before query string false "Created at or before (RFC3339 or YYYY-MM-DD)"
 // @Param active_only query bool false "Hide inactive (default true)"
-// @Param sort query string false "name_asc|name_desc|price_asc|price_desc|newest|oldest|rating_asc|rating_desc"
+// @Param sort query string false "name_asc|name_desc|price_asc|price_desc|newest|oldest|rating_asc|rating_desc|relevance (default relevance when q is set)"
 // @Param page query int false "1-based page (wins over offset)"
 // @Param limit query int false "Page size (default 20, max 100)"
 // @Param offset query int false "Page offset"

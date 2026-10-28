@@ -31,12 +31,23 @@ type Payment struct {
 	CreatedAt        time.Time `json:"created_at"`
 }
 
+// CheckoutSession is a Stripe-hosted checkout page for an order.
+type CheckoutSession struct {
+	ID        string `json:"id"`
+	OrderID   string `json:"order_id"`
+	URL       string `json:"url"`
+	ExpiresAt int64  `json:"expires_at"`
+}
+
 // Service is the payments capability surface.
 type Service interface {
 	// CreateIntent validates ownership, converts the order total, and
 	// returns a Stripe client secret. Retried calls reuse the pending
 	// intent instead of double-charging.
 	CreateIntent(ctx context.Context, userID, orderID string) (Payment, error)
+	// CreateCheckoutSession creates a Stripe-hosted checkout page for the
+	// owned pending order. It deliberately does not change CreateIntent.
+	CreateCheckoutSession(ctx context.Context, userID, orderID string) (CheckoutSession, error)
 	// HandleWebhook verifies the Stripe signature and settles the order.
 	// Unknown event kinds are ignored (nil). Invalid signatures error —
 	// the handler answers 4xx so Stripe does NOT retry forgeries.
