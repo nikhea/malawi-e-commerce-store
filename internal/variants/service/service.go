@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	inventorypublic "github.com/nikhea/malawi-e-commerce-store/internal/inventory/public"
 	"github.com/nikhea/malawi-e-commerce-store/internal/variants/model"
 	"github.com/nikhea/malawi-e-commerce-store/internal/variants/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
@@ -21,17 +22,20 @@ type Repository interface {
 }
 
 type service struct {
-	repo Repository
+	repo      Repository
+	inventory inventorypublic.Service
 }
 
-func NewService(repo Repository) public.Service {
-	return &service{repo: repo}
+func NewService(repo Repository, inventory inventorypublic.Service) public.Service {
+	return &service{repo: repo, inventory: inventory}
 }
 
-func toPublic(v model.Variant) public.Variant {
+func toPublic(v model.Variant, available int) public.Variant {
 	return public.Variant{
 		ID: v.ID, ProductID: v.ProductID, Name: v.Name, SKU: v.SKU,
-		PriceCents: v.PriceCents, IsActive: v.IsActive, CreatedAt: v.CreatedAt,
+		PriceCents: v.PriceCents, IsActive: v.IsActive,
+		Available: available, InStock: available > 0,
+		CreatedAt: v.CreatedAt,
 	}
 }
 
@@ -57,7 +61,8 @@ func (s *service) Create(ctx context.Context, in public.CreateVariantInput) (pub
 	if err != nil {
 		return public.Variant{}, err // CONFLICT / product NOT_FOUND pass through
 	}
-	return toPublic(v), nil
+	// A new SKU has no inventory row yet: available is genuinely zero.
+	return toPublic(v, 0), nil
 }
 
 func (s *service) ListByProduct(ctx context.Context, productID string) ([]public.Variant, error) {
@@ -68,9 +73,19 @@ func (s *service) ListByProduct(ctx context.Context, productID string) ([]public
 	if err != nil {
 		return nil, err
 	}
+	stocks, err := s.inventory.ListStockByProduct(ctx, productID)
+	if err != nil {
+		return nil, err
+	}
+	available := make(map[string]int, len(stocks))
+	for _, stock := range stocks {
+		if stock.VariantID != nil {
+			available[*stock.VariantID] = stock.Available
+		}
+	}
 	out := make([]public.Variant, 0, len(variants))
 	for _, v := range variants {
-		out = append(out, toPublic(v))
+		out = append(out, toPublic(v, available[v.ID]))
 	}
 	return out, nil
 }
@@ -103,11 +118,17 @@ func (s *service) Update(ctx context.Context, id string, in public.UpdateVariant
 	// NOTE: product_id and sku are immutable (order history references
 	// them); changing either means creating a new variant.
 
+	// Read stock before the write so a stock lookup failure cannot leave
+	// the caller with a 500 after the variant was already updated.
+	stock, err := s.inventory.GetStock(ctx, current.ProductID, &current.ID)
+	if err != nil {
+		return public.Variant{}, err
+	}
 	updated, err := s.repo.Update(ctx, current)
 	if err != nil {
 		return public.Variant{}, err
 	}
-	return toPublic(updated), nil
+	return toPublic(updated, stock.Available), nil
 }
 
 func (s *service) Delete(ctx context.Context, id string) error {

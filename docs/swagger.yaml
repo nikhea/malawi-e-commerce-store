@@ -643,11 +643,21 @@ definitions:
     type: object
   public.Variant:
     properties:
+      available:
+        description: |-
+          Available is on-hand minus active reservations: the number a
+          shopper can add to the cart right now. Zero for a brand-new SKU
+          until an admin sets stock.
+        example: 16
+        type: integer
       created_at:
         type: string
       id:
         example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
         type: string
+      in_stock:
+        example: true
+        type: boolean
       is_active:
         type: boolean
       name:
@@ -664,8 +674,14 @@ definitions:
     type: object
   public.VariantView:
     properties:
+      available:
+        example: 16
+        type: integer
       id:
         type: string
+      in_stock:
+        example: true
+        type: boolean
       is_active:
         type: boolean
       name:

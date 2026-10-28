@@ -31,6 +31,9 @@ type Service interface {
 	// GetStock reads availability. Unknown SKU = zero stock, NOT an
 	// error (untracked items simply can't be reserved).
 	GetStock(ctx context.Context, productID string, variantID *string) (Stock, error)
+	// ListStockByProduct returns every stock row for a product, in one
+	// query. Callers compose it into catalog reads without N+1 lookups.
+	ListStockByProduct(ctx context.Context, productID string) ([]Stock, error)
 	// Reserve holds qty for orderRef for ttl. Fails with CONFLICT when
 	// any line lacks availability. Atomic: all lines or none.
 	Reserve(ctx context.Context, orderRef string, lines []ReserveLine, ttl time.Duration) error

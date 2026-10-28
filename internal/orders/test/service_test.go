@@ -123,6 +123,9 @@ func (f *fakeInventory) SetStock(context.Context, string, *string, int) (invento
 func (f *fakeInventory) GetStock(context.Context, string, *string) (inventorypublic.Stock, error) {
 	return inventorypublic.Stock{}, nil
 }
+func (f *fakeInventory) ListStockByProduct(context.Context, string) ([]inventorypublic.Stock, error) {
+	return nil, nil
+}
 func (f *fakeInventory) Reserve(_ context.Context, orderRef string, _ []inventorypublic.ReserveLine, _ time.Duration) error {
 	if f.failReserve {
 		return apperr.Conflict("insufficient stock")

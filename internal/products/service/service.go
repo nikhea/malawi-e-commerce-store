@@ -51,6 +51,7 @@ func toDetail(p model.Product, variants []variantspublic.Variant) public.Detail 
 		views = append(views, public.VariantView{
 			ID: v.ID, Name: v.Name, SKU: v.SKU,
 			PriceCents: v.PriceCents, IsActive: v.IsActive,
+			Available: v.Available, InStock: v.InStock,
 		})
 	}
 	return public.Detail{Product: toPublic(p), Variants: views}

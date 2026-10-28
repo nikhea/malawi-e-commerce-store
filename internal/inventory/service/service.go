@@ -16,6 +16,7 @@ var _ public.Service = (*service)(nil)
 type Repository interface {
 	UpsertStock(ctx context.Context, productID string, variantID *string, qty int) (model.Stock, error)
 	GetStock(ctx context.Context, productID string, variantID *string) (model.Stock, error)
+	ListStockByProduct(ctx context.Context, productID string) ([]model.Stock, error)
 	Reserve(ctx context.Context, orderRef string, lines []model.Reservation, expiresAt time.Time) error
 	ReleaseByOrder(ctx context.Context, orderRef string) error
 	ConfirmByOrder(ctx context.Context, orderRef string) error
@@ -61,6 +62,21 @@ func (s *service) GetStock(ctx context.Context, productID string, variantID *str
 		return public.Stock{}, err
 	}
 	return toPublic(stock), nil
+}
+
+func (s *service) ListStockByProduct(ctx context.Context, productID string) ([]public.Stock, error) {
+	if strings.TrimSpace(productID) == "" {
+		return nil, apperr.Validation("product id is required")
+	}
+	rows, err := s.repo.ListStockByProduct(ctx, productID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]public.Stock, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, toPublic(row))
+	}
+	return out, nil
 }
 
 func (s *service) Reserve(ctx context.Context, orderRef string, lines []public.ReserveLine, ttl time.Duration) error {

@@ -36,6 +36,8 @@ type VariantView struct {
 	SKU        string `json:"sku" example:"OIL-500-001"`
 	PriceCents int64  `json:"price_cents" example:"2500"`
 	IsActive   bool   `json:"is_active"`
+	Available  int    `json:"available" example:"16"`
+	InStock    bool   `json:"in_stock" example:"true"`
 }
 
 // Detail is the storefront product page: product + its SKUs.

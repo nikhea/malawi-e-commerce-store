@@ -126,7 +126,10 @@ func (fakeVariants) Create(context.Context, variantspublic.CreateVariantInput) (
 }
 func (fakeVariants) ListByProduct(_ context.Context, productID string) ([]variantspublic.Variant, error) {
 	if productID == "prod-oil" {
-		return []variantspublic.Variant{{ID: "v1", ProductID: "prod-oil", Name: "500ml", SKU: "OIL-500", PriceCents: 2500, IsActive: true}}, nil
+		return []variantspublic.Variant{{
+			ID: "v1", ProductID: "prod-oil", Name: "500ml", SKU: "OIL-500",
+			PriceCents: 2500, IsActive: true, Available: 16, InStock: true,
+		}}, nil
 	}
 	return []variantspublic.Variant{}, nil
 }
@@ -183,6 +186,9 @@ func TestDetailComposesVariants(t *testing.T) {
 	}
 	if d.Product.ID != "prod-oil" || len(d.Variants) != 1 || d.Variants[0].SKU != "OIL-500" {
 		t.Fatalf("bad detail: %+v", d)
+	}
+	if d.Variants[0].Available != 16 || !d.Variants[0].InStock {
+		t.Fatalf("variant stock not composed: %+v", d.Variants[0])
 	}
 }
 

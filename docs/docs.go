@@ -3689,12 +3689,21 @@ const docTemplate = `{
         "public.Variant": {
             "type": "object",
             "properties": {
+                "available": {
+                    "description": "Available is on-hand minus active reservations: the number a\nshopper can add to the cart right now. Zero for a brand-new SKU\nuntil an admin sets stock.",
+                    "type": "integer",
+                    "example": 16
+                },
                 "created_at": {
                     "type": "string"
                 },
                 "id": {
                     "type": "string",
                     "example": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                },
+                "in_stock": {
+                    "type": "boolean",
+                    "example": true
                 },
                 "is_active": {
                     "type": "boolean"
@@ -3719,8 +3728,16 @@ const docTemplate = `{
         "public.VariantView": {
             "type": "object",
             "properties": {
+                "available": {
+                    "type": "integer",
+                    "example": 16
+                },
                 "id": {
                     "type": "string"
+                },
+                "in_stock": {
+                    "type": "boolean",
+                    "example": true
                 },
                 "is_active": {
                     "type": "boolean"
