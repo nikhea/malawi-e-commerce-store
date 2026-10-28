@@ -1,4 +1,4 @@
-# @nikhea/malawi-store-sdk
+# @malawistore/malawi-store-sdk
 
 TypeScript SDK for the **Malawi E-Commerce Store** Go API (`/api/v1`). Zero runtime
 dependencies — plain `fetch` — so it runs in Node 18+, Next.js, Vite, and browsers.
@@ -13,13 +13,13 @@ dependencies — plain `fetch` — so it runs in Node 18+, Next.js, Vite, and br
 ## Install
 
 ```bash
-npm install @nikhea/malawi-store-sdk
+npm install @malawistore/malawi-store-sdk
 ```
 
 ## Quick start
 
 ```ts
-import { MalawiStoreClient, formatUSD } from "@nikhea/malawi-store-sdk";
+import { MalawiStoreClient, formatUSD } from "@malawistore/malawi-store-sdk";
 
 const store = new MalawiStoreClient({
   baseUrl: "https://api.mystore.mw", // default http://localhost:8080
@@ -95,7 +95,7 @@ pickers can disable sold-out options without extra calls.
 Helpers included:
 
 ```ts
-import { usd, toUsd, formatUSD, districtsByRegion } from "@nikhea/malawi-store-sdk";
+import { usd, toUsd, formatUSD, districtsByRegion } from "@malawistore/malawi-store-sdk";
 
 usd(125);                   // 12500
 toUsd(12500);               // 125
