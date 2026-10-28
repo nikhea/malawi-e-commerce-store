@@ -12,8 +12,9 @@ import (
 
 // fakeRepo is an in-memory Repository. No real DB.
 type fakeRepo struct {
-	byID   map[string]model.Category
-	bySlug map[string]string
+	byID       map[string]model.Category
+	bySlug     map[string]string
+	lastFilter model.ListFilter
 }
 
 func newFakeRepo(seed ...model.Category) *fakeRepo {
@@ -51,12 +52,13 @@ func (f *fakeRepo) GetBySlug(_ context.Context, slug string) (model.Category, er
 	return f.byID[id], nil
 }
 
-func (f *fakeRepo) List(_ context.Context) ([]model.Category, error) {
+func (f *fakeRepo) List(_ context.Context, filter model.ListFilter) ([]model.Category, int64, error) {
+	f.lastFilter = filter
 	out := []model.Category{}
 	for _, c := range f.byID {
 		out = append(out, c)
 	}
-	return out, nil
+	return out, int64(len(out)), nil
 }
 
 func (f *fakeRepo) Update(_ context.Context, c model.Category) (model.Category, error) {
@@ -87,6 +89,65 @@ func (f *fakeRepo) SetImage(_ context.Context, id, url, publicID string) (model.
 }
 
 func strptr(s string) *string { return &s }
+func boolptr(v bool) *bool    { return &v }
+
+func TestListFiltersAndPagination(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo(
+		model.Category{ID: "c1", Name: "Dresses", Slug: "dresses"},
+		model.Category{ID: "c2", Name: "Tops", Slug: "tops"},
+	)
+	svc := service.NewService(repo)
+
+	page, err := svc.List(ctx, public.ListFilter{
+		Query: "  dress ", ParentID: strptr("  "), HasProducts: boolptr(true),
+		Sort: "product_count_desc", Page: 2, Limit: 5,
+	})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if page.Meta.Page != 2 || page.Meta.Limit != 5 || page.Meta.Offset != 5 || page.Meta.Total != 2 {
+		t.Fatalf("bad meta: %+v", page.Meta)
+	}
+	f := repo.lastFilter
+	if f.Query != "dress" || f.ParentID != nil || f.Sort != "product_count_desc" {
+		t.Fatalf("bad filter: %+v", f)
+	}
+	if f.HasProducts == nil || !*f.HasProducts || f.Limit != 5 || f.Offset != 5 {
+		t.Fatalf("bad filter: %+v", f)
+	}
+
+	page, err = svc.List(ctx, public.ListFilter{})
+	if err != nil {
+		t.Fatalf("default list: %v", err)
+	}
+	if page.Meta.Limit != 20 || repo.lastFilter.Sort != "name_asc" {
+		t.Fatalf("bad defaults: meta=%+v filter=%+v", page.Meta, repo.lastFilter)
+	}
+}
+
+func TestListValidation(t *testing.T) {
+	ctx := context.Background()
+	svc := service.NewService(newFakeRepo())
+
+	cases := []struct {
+		name string
+		in   public.ListFilter
+	}{
+		{"negative limit", public.ListFilter{Limit: -1}},
+		{"negative offset", public.ListFilter{Offset: -1}},
+		{"negative page", public.ListFilter{Page: -1}},
+		{"root and parent", public.ListFilter{RootOnly: true, ParentID: strptr("c1")}},
+		{"unknown sort", public.ListFilter{Sort: "random"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := svc.List(ctx, tc.in); apperr.CodeOf(err) != apperr.CodeValidation {
+				t.Fatalf("expected VALIDATION_ERROR, got %v", err)
+			}
+		})
+	}
+}
 
 func TestSlugify(t *testing.T) {
 	tests := []struct{ name, slug string }{

@@ -103,8 +103,8 @@ func (fakeProducts) GetByID(_ context.Context, id string) (productspublic.Detail
 func (fakeProducts) GetBySlug(context.Context, string) (productspublic.Detail, error) {
 	return productspublic.Detail{}, apperr.NotFound("product not found")
 }
-func (fakeProducts) List(context.Context, productspublic.ListFilter) ([]productspublic.Product, error) {
-	return nil, nil
+func (fakeProducts) List(context.Context, productspublic.ListFilter) (productspublic.Page, error) {
+	return productspublic.Page{}, nil
 }
 func (fakeProducts) Update(context.Context, string, productspublic.UpdateProductInput) (productspublic.Product, error) {
 	return productspublic.Product{}, nil

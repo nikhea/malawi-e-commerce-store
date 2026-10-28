@@ -8,6 +8,8 @@ package public
 import (
 	"context"
 	"time"
+
+	"github.com/nikhea/malawi-e-commerce-store/pkg/pagination"
 )
 
 // Product is the catalog view of an SPU. Prices are minor units
@@ -67,12 +69,44 @@ type UpdateProductInput struct {
 }
 
 // ListFilter scopes the catalog listing. Zero value = active only,
-// first page.
+// first page, name order.
 type ListFilter struct {
-	CategoryID *string
-	ActiveOnly bool
-	Limit      int
-	Offset     int
+	// Query matches name, description or slug (case-insensitive substring).
+	Query string
+	// CategoryID and CategorySlug are alternative taxonomy filters.
+	CategoryID    *string
+	CategorySlug  *string
+	MinPriceCents *int64
+	MaxPriceCents *int64
+	// InStock keeps only products with at least one sellable unit.
+	InStock *bool
+	// Size matches an active variant name (XS, M, XL, ...).
+	Size string
+	// MinRating keeps products whose average review rating is at least
+	// this (0-5). Products without reviews are excluded.
+	MinRating     *float64
+	CreatedAfter  *time.Time
+	CreatedBefore *time.Time
+	ActiveOnly    bool
+	// Sort is a whitelisted order key; empty means "name_asc".
+	Sort   string
+	Page   int
+	Limit  int
+	Offset int
+}
+
+// Page is one catalog page: rows plus the counters clients need to page
+// without a second count request.
+type Page struct {
+	Items []Product
+	Meta  pagination.Meta
+}
+
+// ProductListResponse is the documented wire shape for GET /products:
+// the array stays under "data", paging counters under "meta".
+type ProductListResponse struct {
+	Data []Product       `json:"data"`
+	Meta pagination.Meta `json:"meta"`
 }
 
 // Service is the products capability surface. Reads are public;
@@ -81,7 +115,7 @@ type Service interface {
 	Create(ctx context.Context, in CreateProductInput) (Product, error)
 	GetByID(ctx context.Context, id string) (Detail, error)
 	GetBySlug(ctx context.Context, slug string) (Detail, error)
-	List(ctx context.Context, f ListFilter) ([]Product, error)
+	List(ctx context.Context, f ListFilter) (Page, error)
 	Update(ctx context.Context, id string, in UpdateProductInput) (Product, error)
 	Delete(ctx context.Context, id string) error
 	SetImage(ctx context.Context, id, url, publicID string) (Product, error)

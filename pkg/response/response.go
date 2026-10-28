@@ -8,9 +8,12 @@ import (
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
 )
 
-// Envelope shapes. Success: {"data": …}. Failure: {"error": {"code": …, "message": …}}.
+// Envelope shapes. Success: {"data": …}. Paged success adds a sibling
+// "meta" object so existing clients keep reading an array from data.
+// Failure: {"error": {"code": …, "message": …}}.
 type envelope struct {
 	Data any `json:"data,omitempty"`
+	Meta any `json:"meta,omitempty"`
 }
 
 // ErrorDetail is one machine-readable failure. Exported so swag can
@@ -29,6 +32,13 @@ type ErrorResponse struct {
 // OK writes 200 with {"data": data}.
 func OK(c *gin.Context, data any) {
 	c.JSON(http.StatusOK, envelope{Data: data})
+}
+
+// OKMeta writes 200 with {"data": data, "meta": meta}. List endpoints use
+// it: data stays the row array (backward compatible) and meta carries
+// page/limit/total counters.
+func OKMeta(c *gin.Context, data any, meta any) {
+	c.JSON(http.StatusOK, envelope{Data: data, Meta: meta})
 }
 
 // Created writes 201 with {"data": data}.

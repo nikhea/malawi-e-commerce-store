@@ -4,6 +4,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	mediapublic "github.com/nikhea/malawi-e-commerce-store/internal/media/public"
@@ -29,13 +31,26 @@ func New(svc public.Service, media mediapublic.Service) *Handler {
 // List godoc
 // @Summary List products
 // @Description Lightweight catalog rows (no variants — fetch Detail per product).
+// @Description Ships {"data": [rows], "meta": {page, limit, offset, total, total_pages, has_next, has_prev}}.
 // @Tags products
 // @Produce json
-// @Param category_id query string false "Filter by category"
+// @Param q query string false "Search name, description or slug"
+// @Param category_id query string false "Filter by category UUID"
+// @Param category_slug query string false "Filter by category slug"
+// @Param min_price_cents query int false "Minimum price in tambala"
+// @Param max_price_cents query int false "Maximum price in tambala"
+// @Param in_stock query bool false "Only products with sellable stock (false = out of stock only)"
+// @Param size query string false "Variant size name, e.g. XS, M, XL"
+// @Param min_rating query number false "Minimum average review rating (0-5)"
+// @Param created_after query string false "Created at or after (RFC3339 or YYYY-MM-DD)"
+// @Param created_before query string false "Created at or before (RFC3339 or YYYY-MM-DD)"
 // @Param active_only query bool false "Hide inactive (default true)"
+// @Param sort query string false "name_asc|name_desc|price_asc|price_desc|newest|oldest|rating_asc|rating_desc"
+// @Param page query int false "1-based page (wins over offset)"
 // @Param limit query int false "Page size (default 20, max 100)"
 // @Param offset query int false "Page offset"
-// @Success 200 {array} public.Product
+// @Success 200 {object} public.ProductListResponse
+// @Failure 400 {object} response.ErrorResponse
 // @Router /products [get]
 func (h *Handler) List(c *gin.Context) {
 	var q dto.ListProductsQuery
@@ -43,18 +58,53 @@ func (h *Handler) List(c *gin.Context) {
 		response.Error(c, apperr.Validation("invalid query"))
 		return
 	}
+	after, err := parseDateParam(q.CreatedAfter, false)
+	if err != nil {
+		response.Error(c, apperr.Validation("created_after must be RFC3339 or YYYY-MM-DD"))
+		return
+	}
+	before, err := parseDateParam(q.CreatedBefore, true)
+	if err != nil {
+		response.Error(c, apperr.Validation("created_before must be RFC3339 or YYYY-MM-DD"))
+		return
+	}
 	activeOnly := true
 	if q.ActiveOnly != nil {
 		activeOnly = *q.ActiveOnly
 	}
-	products, err := h.svc.List(c.Request.Context(), public.ListFilter{
-		CategoryID: q.CategoryID, ActiveOnly: activeOnly, Limit: q.Limit, Offset: q.Offset,
+	page, err := h.svc.List(c.Request.Context(), public.ListFilter{
+		Query: q.Q, CategoryID: q.CategoryID, CategorySlug: q.CategorySlug,
+		MinPriceCents: q.MinPriceCents, MaxPriceCents: q.MaxPriceCents,
+		InStock: q.InStock, Size: q.Size, MinRating: q.MinRating,
+		CreatedAfter: after, CreatedBefore: before, ActiveOnly: activeOnly,
+		Sort: q.Sort, Page: q.Page, Limit: q.Limit, Offset: q.Offset,
 	})
 	if err != nil {
 		response.Error(c, err)
 		return
 	}
-	response.OK(c, products)
+	response.OKMeta(c, page.Items, page.Meta)
+}
+
+// parseDateParam accepts RFC3339 timestamps and plain calendar dates.
+// A date-only created_before expands to the end of that day, so
+// "created_before=2026-10-28" includes the whole 28th.
+func parseDateParam(raw string, endOfDay bool) (*time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return &t, nil
+	}
+	t, err := time.Parse("2006-01-02", raw)
+	if err != nil {
+		return nil, err
+	}
+	if endOfDay {
+		t = t.Add(24*time.Hour - time.Nanosecond)
+	}
+	return &t, nil
 }
 
 // GetByID godoc

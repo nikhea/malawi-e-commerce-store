@@ -1,5 +1,18 @@
 package dto
 
+// ListCategoriesQuery binds the storefront taxonomy filters. Page wins
+// over offset when both are sent.
+type ListCategoriesQuery struct {
+	Q           string  `form:"q"`
+	ParentID    *string `form:"parent_id"`
+	RootOnly    *bool   `form:"root_only"`
+	HasProducts *bool   `form:"has_products"`
+	Sort        string  `form:"sort"`
+	Page        int     `form:"page"`
+	Limit       int     `form:"limit"`
+	Offset      int     `form:"offset"`
+}
+
 // CreateCategoryRequest is the POST /admin/categories body. ImageURL is
 // an optional direct link; omit it to upload a file later instead.
 type CreateCategoryRequest struct {

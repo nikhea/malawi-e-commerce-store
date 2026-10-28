@@ -24,10 +24,22 @@ type UpdateProductRequest struct {
 	ClearCategory bool    `json:"clear_category,omitempty"`
 }
 
-// ListProductsQuery binds ?category_id=&active_only=&limit=&offset=.
+// ListProductsQuery binds the storefront catalog filters. Dates accept
+// RFC3339 or YYYY-MM-DD; page wins over offset when both are sent.
 type ListProductsQuery struct {
-	CategoryID *string `form:"category_id"`
-	ActiveOnly *bool   `form:"active_only"`
-	Limit      int     `form:"limit"`
-	Offset     int     `form:"offset"`
+	Q             string   `form:"q"`
+	CategoryID    *string  `form:"category_id"`
+	CategorySlug  *string  `form:"category_slug"`
+	MinPriceCents *int64   `form:"min_price_cents"`
+	MaxPriceCents *int64   `form:"max_price_cents"`
+	InStock       *bool    `form:"in_stock"`
+	Size          string   `form:"size"`
+	MinRating     *float64 `form:"min_rating"`
+	CreatedAfter  string   `form:"created_after"`
+	CreatedBefore string   `form:"created_before"`
+	ActiveOnly    *bool    `form:"active_only"`
+	Sort          string   `form:"sort"`
+	Page          int      `form:"page"`
+	Limit         int      `form:"limit"`
+	Offset        int      `form:"offset"`
 }

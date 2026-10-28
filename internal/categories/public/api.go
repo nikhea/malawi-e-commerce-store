@@ -6,6 +6,8 @@ package public
 import (
 	"context"
 	"time"
+
+	"github.com/nikhea/malawi-e-commerce-store/pkg/pagination"
 )
 
 // Category is the cross-module view of a taxonomy node. ParentID nil =
@@ -41,13 +43,44 @@ type UpdateCategoryInput struct {
 	ClearParent bool
 }
 
+// ListFilter scopes the taxonomy listing. Zero value = first page,
+// name order, every category.
+type ListFilter struct {
+	// Query matches name, description or slug (case-insensitive substring).
+	Query string
+	// ParentID narrows to one parent's children; RootOnly narrows to roots.
+	ParentID *string
+	RootOnly bool
+	// HasProducts true = only categories with active products;
+	// false = only empty categories; nil = no filter.
+	HasProducts *bool
+	// Sort: name_asc, name_desc, newest, oldest, product_count_desc,
+	// product_count_asc. Empty means name_asc.
+	Sort   string
+	Page   int
+	Limit  int
+	Offset int
+}
+
+// Page is one taxonomy page.
+type Page struct {
+	Items []Category
+	Meta  pagination.Meta
+}
+
+// CategoryListResponse is the documented wire shape for GET /categories.
+type CategoryListResponse struct {
+	Data []Category      `json:"data"`
+	Meta pagination.Meta `json:"meta"`
+}
+
 // Service is the categories capability surface. Reads are public
 // (storefront browsing); writes are admin-gated at the routes layer.
 type Service interface {
 	Create(ctx context.Context, in CreateCategoryInput) (Category, error)
 	GetByID(ctx context.Context, id string) (Category, error)
 	GetBySlug(ctx context.Context, slug string) (Category, error)
-	List(ctx context.Context) ([]Category, error)
+	List(ctx context.Context, f ListFilter) (Page, error)
 	Update(ctx context.Context, id string, in UpdateCategoryInput) (Category, error)
 	Delete(ctx context.Context, id string) error
 	// SetImage stores the finished upload outcome. Called by admins

@@ -1632,7 +1632,7 @@ const docTemplate = `{
         },
         "/categories": {
             "get": {
-                "description": "Public storefront taxonomy, flat and ordered by name.",
+                "description": "Public storefront taxonomy, flat and ordered by name.\nShips {\"data\": [rows], \"meta\": {page, limit, offset, total, total_pages, has_next, has_prev}}.",
                 "produces": [
                     "application/json"
                 ],
@@ -1640,14 +1640,67 @@ const docTemplate = `{
                     "categories"
                 ],
                 "summary": "List categories",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Search name, description or slug",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Only children of this category",
+                        "name": "parent_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Only root categories",
+                        "name": "root_only",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Only categories with active products (false = empty only)",
+                        "name": "has_products",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "name_asc|name_desc|newest|oldest|product_count_asc|product_count_desc",
+                        "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "1-based page (wins over offset)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size (default 20, max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page offset",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/public.Category"
-                            }
+                            "$ref": "#/definitions/public.CategoryListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
                         }
                     }
                 }
@@ -1960,7 +2013,7 @@ const docTemplate = `{
         },
         "/products": {
             "get": {
-                "description": "Lightweight catalog rows (no variants — fetch Detail per product).",
+                "description": "Lightweight catalog rows (no variants — fetch Detail per product).\nShips {\"data\": [rows], \"meta\": {page, limit, offset, total, total_pages, has_next, has_prev}}.",
                 "produces": [
                     "application/json"
                 ],
@@ -1971,14 +2024,80 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Filter by category",
+                        "description": "Search name, description or slug",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by category UUID",
                         "name": "category_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by category slug",
+                        "name": "category_slug",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Minimum price in tambala",
+                        "name": "min_price_cents",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum price in tambala",
+                        "name": "max_price_cents",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Only products with sellable stock (false = out of stock only)",
+                        "name": "in_stock",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Variant size name, e.g. XS, M, XL",
+                        "name": "size",
+                        "in": "query"
+                    },
+                    {
+                        "type": "number",
+                        "description": "Minimum average review rating (0-5)",
+                        "name": "min_rating",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Created at or after (RFC3339 or YYYY-MM-DD)",
+                        "name": "created_after",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Created at or before (RFC3339 or YYYY-MM-DD)",
+                        "name": "created_before",
                         "in": "query"
                     },
                     {
                         "type": "boolean",
                         "description": "Hide inactive (default true)",
                         "name": "active_only",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "name_asc|name_desc|price_asc|price_desc|newest|oldest|rating_asc|rating_desc",
+                        "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "1-based page (wins over offset)",
+                        "name": "page",
                         "in": "query"
                     },
                     {
@@ -1998,10 +2117,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/public.Product"
-                            }
+                            "$ref": "#/definitions/public.ProductListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
                         }
                     }
                 }
@@ -3062,6 +3184,39 @@ const docTemplate = `{
                 }
             }
         },
+        "pagination.Meta": {
+            "type": "object",
+            "properties": {
+                "has_next": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "has_prev": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "limit": {
+                    "type": "integer",
+                    "example": 20
+                },
+                "offset": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "page": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "total": {
+                    "type": "integer",
+                    "example": 50
+                },
+                "total_pages": {
+                    "type": "integer",
+                    "example": 3
+                }
+            }
+        },
         "public.Cart": {
             "type": "object",
             "properties": {
@@ -3117,6 +3272,20 @@ const docTemplate = `{
                 "slug": {
                     "type": "string",
                     "example": "cooking-oil"
+                }
+            }
+        },
+        "public.CategoryListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.Category"
+                    }
+                },
+                "meta": {
+                    "$ref": "#/definitions/pagination.Meta"
                 }
             }
         },
@@ -3321,6 +3490,20 @@ const docTemplate = `{
                 "slug": {
                     "type": "string",
                     "example": "sunseed-cooking-oil"
+                }
+            }
+        },
+        "public.ProductListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.Product"
+                    }
+                },
+                "meta": {
+                    "$ref": "#/definitions/pagination.Meta"
                 }
             }
         },
