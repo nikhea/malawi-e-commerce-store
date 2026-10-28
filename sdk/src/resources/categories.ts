@@ -1,7 +1,9 @@
 import type { Requester } from "../http";
 import type {
   Category,
+  CategoryListResponse,
   CreateCategoryInput,
+  ListCategoriesParams,
   OpStatus,
   UpdateCategoryInput,
 } from "../types";
@@ -13,8 +15,14 @@ import type {
 export class CategoriesApi {
   constructor(private readonly request: Requester) {}
 
-  list(): Promise<Category[]> {
-    return this.request("GET", "/categories");
+  /** Lists taxonomy rows without envelope metadata. */
+  list(params?: ListCategoriesParams): Promise<Category[]> {
+    return this.request("GET", "/categories", { query: params });
+  }
+
+  /** Lists a taxonomy page plus pagination counters. */
+  listPage(params?: ListCategoriesParams): Promise<CategoryListResponse> {
+    return this.request("GET", "/categories", { query: params, raw: true });
   }
 
   get(id: string): Promise<Category> {

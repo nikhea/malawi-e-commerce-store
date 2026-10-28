@@ -19,6 +19,23 @@ export type OpStatus = { status: string };
 export type ErrorDetail = { code: string; message: string };
 export type ErrorResponse = { error: ErrorDetail };
 
+/**
+ * Paging counters shipped beside list rows in the `meta` envelope.
+ * `offset`/`limit` let a client continue from either paging style.
+ */
+export type PaginationMeta = {
+  page: number;
+  limit: number;
+  offset: number;
+  total: number;
+  total_pages: number;
+  has_next: boolean;
+  has_prev: boolean;
+};
+
+/** Raw paged envelope: `{ data: rows, meta: counters }`. */
+export type Paginated<T> = { data: T[]; meta: PaginationMeta };
+
 // ---------------------------------------------------------------------------
 // auth — /api/v1/auth (public, rate-limited 10/min/IP)
 // ---------------------------------------------------------------------------
@@ -86,17 +103,70 @@ export type UpdateCategoryInput = {
   clear_parent?: boolean;
 };
 
+export type CategorySort =
+  | "name_asc"
+  | "name_desc"
+  | "newest"
+  | "oldest"
+  | "product_count_asc"
+  | "product_count_desc";
+
+export type ListCategoriesParams = {
+  /** Case-insensitive substring over name, description and slug. */
+  q?: string;
+  parent_id?: string;
+  root_only?: boolean;
+  /** true = categories with active products; false = empty only. */
+  has_products?: boolean;
+  sort?: CategorySort;
+  /** 1-based page. Wins over `offset` when both are sent. */
+  page?: number;
+  limit?: number;
+  offset?: number;
+};
+
+export type CategoryListResponse = Paginated<Category>;
+
 // ---------------------------------------------------------------------------
 // products / variants — /api/v1/products
 // ---------------------------------------------------------------------------
 
+export type ProductSort =
+  | "name_asc"
+  | "name_desc"
+  | "price_asc"
+  | "price_desc"
+  | "newest"
+  | "oldest"
+  | "rating_asc"
+  | "rating_desc";
+
 /** Minor units: MWK tambala (12500 = K125.00). */
 export type ListProductsParams = {
+  /** Case-insensitive substring over name, description and slug. */
+  q?: string;
   category_id?: string;
+  category_slug?: string;
+  min_price_cents?: number;
+  max_price_cents?: number;
+  /** true = in stock; false = out of stock only. */
+  in_stock?: boolean;
+  /** Active variant name, e.g. XS, M, XL. */
+  size?: string;
+  /** 0-5; products without reviews are excluded when set above 0. */
+  min_rating?: number;
+  /** RFC3339 timestamp or YYYY-MM-DD. */
+  created_after?: string;
+  created_before?: string;
   active_only?: boolean;
+  sort?: ProductSort;
+  /** 1-based page. Wins over `offset` when both are sent. */
+  page?: number;
   limit?: number;
   offset?: number;
 };
+
+export type ProductListResponse = Paginated<Product>;
 
 export type Product = {
   id: string;

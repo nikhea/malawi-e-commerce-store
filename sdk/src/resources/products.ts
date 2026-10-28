@@ -5,6 +5,7 @@ import type {
   OpStatus,
   Product,
   ProductDetail,
+  ProductListResponse,
   UpdateProductInput,
   Variant,
   CreateVariantInput,
@@ -17,9 +18,20 @@ import type {
 export class ProductsApi {
   constructor(private readonly request: Requester) {}
 
-  /** Lists SKUs' parent SPUs; call `variants.listFor(productId)` for SKU data. */
+  /**
+   * Lists SKUs' parent SPUs without envelope metadata. Same filters and
+   * paging as `listPage`; use this when you only need the rows.
+   */
   list(params?: ListProductsParams): Promise<Product[]> {
     return this.request("GET", "/products", { query: params });
+  }
+
+  /**
+   * Lists a catalog page plus pagination counters (`total`, `total_pages`,
+   * `has_next`, …). Best for paginated storefront grids.
+   */
+  listPage(params?: ListProductsParams): Promise<ProductListResponse> {
+    return this.request("GET", "/products", { query: params, raw: true });
   }
 
   get(id: string): Promise<ProductDetail> {

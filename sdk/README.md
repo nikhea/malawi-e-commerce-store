@@ -47,6 +47,44 @@ const payment = await store.payments.createIntent({ order_id: order.id });
 // Poll store.orders.get(order.id) — the webhook settles pending → paid.
 ```
 
+### Catalog filters and pagination
+
+`list()` returns just the rows. `listPage()` returns the same rows plus the
+API's `meta` counters, so a grid can render paging controls without a second
+request.
+
+```ts
+const page = await store.products.listPage({
+  q: "dress",                 // name, description or slug
+  category_slug: "dresses",
+  min_price_cents: 1_000_00,
+  max_price_cents: 9_000_00,
+  in_stock: true,
+  size: "XL",                 // active variant name
+  min_rating: 4,
+  sort: "price_desc",
+  page: 2,
+  limit: 24,
+});
+
+page.data;       // Product[]
+page.meta;       // { page, limit, offset, total, total_pages, has_next, has_prev }
+```
+
+Category listings take the same paging knobs plus `q`, `parent_id`, `root_only`,
+`has_products` and `sort`:
+
+```ts
+const categories = await store.categories.listPage({
+  has_products: true,
+  sort: "product_count_desc",
+  limit: 20,
+});
+```
+
+`page` wins over `offset` when both are sent. The API defaults to 20 rows and
+caps a page at 100.
+
 ### Prices are minor units (MWK tambala)
 
 `12500` = **K125.00**. Helpers included:
