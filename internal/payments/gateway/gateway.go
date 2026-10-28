@@ -101,7 +101,12 @@ func (g *StripeGateway) VerifyWebhook(payload []byte, sigHeader, webhookSecret s
 	// of mis-parsing them. Consequence: the Stripe dashboard endpoint
 	// MUST be created with stripe-go's pinned API version (see the SDK
 	// mismatch error if this ever fails in production).
-	event, err := webhook.ConstructEvent(payload, sigHeader, webhookSecret)
+	event, err := webhook.ConstructEventWithOptions(payload, sigHeader, webhookSecret, webhook.ConstructEventOptions{
+		// Stripe webhook endpoints can be pinned to an API version that differs
+		// from the SDK's request API version. Signature and timestamp checks
+		// remain enabled; only the version equality check is relaxed.
+		IgnoreAPIVersionMismatch: true,
+	})
 	if err != nil {
 		return WebhookEvent{}, fmt.Errorf("stripe verify webhook: %w", err)
 	}
