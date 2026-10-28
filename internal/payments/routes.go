@@ -17,4 +17,5 @@ func RegisterRoutes(webhooks, protected *gin.RouterGroup, svc public.Service) {
 
 	payments := protected.Group("/payments")
 	payments.POST("/intents", h.CreateIntent)
+	payments.POST("/checkout-sessions", h.CreateCheckoutSession)
 }

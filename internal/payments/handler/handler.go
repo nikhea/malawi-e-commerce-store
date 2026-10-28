@@ -54,6 +54,34 @@ func (h *Handler) CreateIntent(c *gin.Context) {
 	response.Created(c, payment)
 }
 
+// CreateCheckoutSession godoc
+// @Summary Create a hosted Stripe Checkout session
+// @Description Returns a URL for Stripe's hosted checkout page for the owned pending order.
+// @Tags payments
+// @Accept json
+// @Produce json
+// @Param body body dto.CreateIntentRequest true "Order"
+// @Success 201 {object} public.CheckoutSession
+// @Failure 400 {object} response.ErrorResponse
+// @Failure 401 {object} response.ErrorResponse
+// @Failure 404 {object} response.ErrorResponse
+// @Failure 409 {object} response.ErrorResponse
+// @Security BearerAuth
+// @Router /payments/checkout-sessions [post]
+func (h *Handler) CreateCheckoutSession(c *gin.Context) {
+	var req dto.CreateIntentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, apperr.Validation("order_id is required"))
+		return
+	}
+	session, err := h.svc.CreateCheckoutSession(c.Request.Context(), middleware.UserIDOf(c), req.OrderID)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+	response.Created(c, session)
+}
+
 // Webhook godoc
 // @Summary Stripe webhook
 // @Description Verifies the signature, settles the order. No JWT — the

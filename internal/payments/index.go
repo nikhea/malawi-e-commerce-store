@@ -14,9 +14,9 @@ import (
 // *notify.Service). The gateway is constructed at the wiring site (it
 // holds the secret key); the service takes the FX rate + webhook secret
 // via Config. Single entry point.
-func Wire(pool *pgxpool.Pool, orders orderspublic.Service, gw gateway.Gateway, notify paymentservice.Notifier, webhookSecret string, fxRate float64) public.Service {
+func Wire(pool *pgxpool.Pool, orders orderspublic.Service, gw gateway.Gateway, notify paymentservice.Notifier, webhookSecret string, fxRate float64, frontendURL string) public.Service {
 	return paymentservice.NewService(
 		repository.NewPostgres(pool), orders, gw, notify,
-		paymentservice.Config{WebhookSecret: webhookSecret, FXMWKPerUSD: fxRate},
+		paymentservice.Config{WebhookSecret: webhookSecret, FXMWKPerUSD: fxRate, FrontendURL: frontendURL},
 	)
 }
