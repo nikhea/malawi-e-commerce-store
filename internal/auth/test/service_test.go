@@ -75,6 +75,10 @@ func (f *fakeUsers) SetRole(_ context.Context, id string, role userspublic.Role)
 	return r.user, nil
 }
 
+func (f *fakeUsers) List(context.Context, userspublic.ListFilter) (userspublic.Page, error) {
+	return userspublic.Page{}, nil
+}
+
 func (f *fakeUsers) SetEmailVerified(_ context.Context, id string, verified bool) (userspublic.User, error) {
 	r, ok := f.byID[id]
 	if !ok {

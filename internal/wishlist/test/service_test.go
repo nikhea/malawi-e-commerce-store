@@ -102,6 +102,10 @@ func (fakeUsers) GetCredentials(context.Context, string) (userspublic.Credential
 func (fakeUsers) SetRole(context.Context, string, userspublic.Role) (userspublic.User, error) {
 	return userspublic.User{}, nil
 }
+func (fakeUsers) List(context.Context, userspublic.ListFilter) (userspublic.Page, error) {
+	return userspublic.Page{}, nil
+}
+
 func (fakeUsers) SetEmailVerified(context.Context, string, bool) (userspublic.User, error) {
 	return userspublic.User{}, nil
 }

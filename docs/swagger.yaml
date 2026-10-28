@@ -641,6 +641,15 @@ definitions:
         - $ref: '#/definitions/public.Role'
         example: customer
     type: object
+  public.UserListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/public.User'
+        type: array
+      meta:
+        $ref: '#/definitions/pagination.Meta'
+    type: object
   public.Variant:
     properties:
       available:
@@ -1263,6 +1272,70 @@ paths:
       security:
       - BearerAuth: []
       summary: Remove any review (admin)
+      tags:
+      - admin
+  /admin/users:
+    get:
+      description: 'Admin user directory: search, role/verification filters and paging.'
+      parameters:
+      - description: Search email or name
+        in: query
+        name: q
+        type: string
+      - description: admin|customer
+        in: query
+        name: role
+        type: string
+      - description: Filter by verification state
+        in: query
+        name: email_verified
+        type: boolean
+      - description: Created at or after (RFC3339 or YYYY-MM-DD)
+        in: query
+        name: created_after
+        type: string
+      - description: Created at or before (RFC3339 or YYYY-MM-DD)
+        in: query
+        name: created_before
+        type: string
+      - description: newest|oldest|name_asc|name_desc|email_asc|email_desc
+        in: query
+        name: sort
+        type: string
+      - description: 1-based page (wins over offset)
+        in: query
+        name: page
+        type: integer
+      - description: Page size (default 20, max 100)
+        in: query
+        name: limit
+        type: integer
+      - description: Page offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.UserListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List users (admin)
       tags:
       - admin
   /admin/users/{id}/role:

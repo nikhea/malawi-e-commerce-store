@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"strings"
+	"time"
+
 	"github.com/gin-gonic/gin"
 	"github.com/nikhea/malawi-e-commerce-store/internal/users/dto"
 	"github.com/nikhea/malawi-e-commerce-store/internal/users/public"
@@ -59,6 +62,75 @@ func (h *Handler) Me(c *gin.Context) {
 		return
 	}
 	response.OK(c, u)
+}
+
+// List godoc
+// @Summary List users (admin)
+// @Description Admin user directory: search, role/verification filters and paging.
+// @Tags admin
+// @Produce json
+// @Param q query string false "Search email or name"
+// @Param role query string false "admin|customer"
+// @Param email_verified query bool false "Filter by verification state"
+// @Param created_after query string false "Created at or after (RFC3339 or YYYY-MM-DD)"
+// @Param created_before query string false "Created at or before (RFC3339 or YYYY-MM-DD)"
+// @Param sort query string false "newest|oldest|name_asc|name_desc|email_asc|email_desc"
+// @Param page query int false "1-based page (wins over offset)"
+// @Param limit query int false "Page size (default 20, max 100)"
+// @Param offset query int false "Page offset"
+// @Success 200 {object} public.UserListResponse
+// @Failure 400 {object} response.ErrorResponse
+// @Failure 401 {object} response.ErrorResponse
+// @Failure 403 {object} response.ErrorResponse
+// @Security BearerAuth
+// @Router /admin/users [get]
+func (h *Handler) List(c *gin.Context) {
+	var q dto.ListUsersQuery
+	if err := c.ShouldBindQuery(&q); err != nil {
+		response.Error(c, apperr.Validation("invalid query"))
+		return
+	}
+	after, err := parseDateParam(q.CreatedAfter, false)
+	if err != nil {
+		response.Error(c, apperr.Validation("created_after must be RFC3339 or YYYY-MM-DD"))
+		return
+	}
+	before, err := parseDateParam(q.CreatedBefore, true)
+	if err != nil {
+		response.Error(c, apperr.Validation("created_before must be RFC3339 or YYYY-MM-DD"))
+		return
+	}
+	page, err := h.svc.List(c.Request.Context(), public.ListFilter{
+		Query: q.Q, Role: public.Role(strings.ToLower(strings.TrimSpace(q.Role))),
+		EmailVerified: q.EmailVerified, CreatedAfter: after, CreatedBefore: before,
+		Sort: q.Sort, Page: q.Page, Limit: q.Limit, Offset: q.Offset,
+	})
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+	response.OKMeta(c, page.Items, page.Meta)
+}
+
+// parseDateParam accepts RFC3339 timestamps and plain calendar dates.
+// A date-only created_before expands to the end of that day, so
+// "created_before=2026-10-28" includes the whole 28th.
+func parseDateParam(raw string, endOfDay bool) (*time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return &t, nil
+	}
+	t, err := time.Parse("2006-01-02", raw)
+	if err != nil {
+		return nil, err
+	}
+	if endOfDay {
+		t = t.Add(24*time.Hour - time.Nanosecond)
+	}
+	return &t, nil
 }
 
 // SetRole godoc
