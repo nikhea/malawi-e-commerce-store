@@ -8,8 +8,9 @@ import (
 	"time"
 )
 
-// Variant is one sellable SKU. Price is absolute minor units (tambala),
-// NOT a delta — no base+delta math bugs at checkout.
+// Variant is one sellable SKU. Price is absolute USD cents, NOT a delta —
+// no base+delta math bugs at checkout. (Legacy MWK orders keep their own
+// snapshots in tambala.)
 type Variant struct {
 	ID         string `json:"id" example:"3fa85f64-5717-4562-b3fc-2c963f66afa6"`
 	ProductID  string `json:"product_id"`

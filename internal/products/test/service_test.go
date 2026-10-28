@@ -153,7 +153,7 @@ func TestMoneyAndCategory(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create: %v", err)
 		}
-		if p.PriceCents != 12500 || p.Currency != "MWK" || p.Slug != "sunseed-2l" {
+		if p.PriceCents != 12500 || p.Currency != "USD" || p.Slug != "sunseed-2l" {
 			t.Fatalf("bad product: %+v", p)
 		}
 	})

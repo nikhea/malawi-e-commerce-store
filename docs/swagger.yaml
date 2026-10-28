@@ -71,7 +71,7 @@ definitions:
       category_id:
         type: string
       currency:
-        example: MWK
+        example: USD
         type: string
       description:
         example: Pure sunflower oil
@@ -322,7 +322,7 @@ definitions:
   public.Cart:
     properties:
       currency:
-        example: MWK
+        example: USD
         type: string
       id:
         type: string
@@ -389,7 +389,7 @@ definitions:
   public.Line:
     properties:
       currency:
-        example: MWK
+        example: USD
         type: string
       id:
         type: string
@@ -418,7 +418,7 @@ definitions:
       created_at:
         type: string
       currency:
-        example: MWK
+        example: USD
         type: string
       id:
         type: string
@@ -486,7 +486,7 @@ definitions:
       created_at:
         type: string
       currency:
-        example: MWK
+        example: USD
         type: string
       description:
         example: Pure sunflower oil
@@ -520,7 +520,7 @@ definitions:
   public.ProductSummary:
     properties:
       currency:
-        example: MWK
+        example: USD
         type: string
       id:
         type: string
@@ -1961,7 +1961,8 @@ paths:
     post:
       consumes:
       - application/json
-      description: Validates ownership, converts the MWK total, reuses pending intents.
+      description: Validates ownership, converts legacy MWK totals to USD, reuses
+        pending intents.
       parameters:
       - description: Order
         in: body
@@ -2015,11 +2016,11 @@ paths:
         in: query
         name: category_slug
         type: string
-      - description: Minimum price in tambala
+      - description: Minimum price in USD cents
         in: query
         name: min_price_cents
         type: integer
-      - description: Maximum price in tambala
+      - description: Maximum price in USD cents
         in: query
         name: max_price_cents
         type: integer

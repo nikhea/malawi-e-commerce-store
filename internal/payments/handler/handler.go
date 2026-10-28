@@ -28,7 +28,7 @@ func New(svc public.Service) *Handler {
 
 // CreateIntent godoc
 // @Summary Create a payment intent
-// @Description Validates ownership, converts the MWK total, reuses pending intents.
+// @Description Validates ownership, converts legacy MWK totals to USD, reuses pending intents.
 // @Tags payments
 // @Accept json
 // @Produce json

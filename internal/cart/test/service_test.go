@@ -105,12 +105,12 @@ func detailFor(id string) (productspublic.Detail, error) {
 	switch id {
 	case "prod-1":
 		return productspublic.Detail{
-			Product:  productspublic.Product{ID: "prod-1", Name: "Oil", PriceCents: 1000, Currency: "MWK", IsActive: true},
+			Product:  productspublic.Product{ID: "prod-1", Name: "Oil", PriceCents: 1000, Currency: "USD", IsActive: true},
 			Variants: []productspublic.VariantView{{ID: "var-1", Name: "500ml", SKU: "OIL-500", PriceCents: 2500, IsActive: true}},
 		}, nil
 	case "prod-off":
 		return productspublic.Detail{
-			Product: productspublic.Product{ID: "prod-off", Name: "Old", PriceCents: 100, Currency: "MWK", IsActive: false},
+			Product: productspublic.Product{ID: "prod-off", Name: "Old", PriceCents: 100, Currency: "USD", IsActive: false},
 		}, nil
 	}
 	return productspublic.Detail{}, apperr.NotFound("product not found")

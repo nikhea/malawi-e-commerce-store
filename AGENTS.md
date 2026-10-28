@@ -234,7 +234,7 @@ enforces this at build time).
 - Cart (`6741063`): one cart per user, catalog-validated adds with price snapshots, COALESCE-index line merge, JWT-only routes (`0006`).
 - Inventory (`8c8c1d9`): on-hand + reserved counters with CHECK guard, transactional reserve/release/confirm, idempotent settle, admin-only routes (`0007`).
 - Orders (`693c4db`): checkout freezing cart into pending orders, guarded pending→paid|cancelled transitions, crash-safe MarkPaid, `pkg/events` bus with OrderCreated/Paid/Cancelled (`0008`).
-- Payments (`ffad265`): Stripe intents with MWK→USD conversion, HMAC webhooks settling orders, idempotent retries, `PaymentSucceeded/Failed` events (`0009`).
+- Payments (`ffad265`): Stripe intents in USD (USD orders charge directly, legacy MWK orders convert), HMAC webhooks settling orders, idempotent retries, `PaymentSucceeded/Failed` events (`0009`).
 - Wishlist + reviews (`40df44f`): idempotent hearts with catalog snapshots (`0010`); one-review-per-user with author snapshots, SQL aggregates, owner isolation + admin moderation (`0011`, `0012`).
 - Worker + expiry sweep (`413e152`): `cmd/worker` runs media uploads, the cron expiry job, and log-based notify subscribers; `internal/jobs` shared so api + worker both schedule/work it; `ReleaseExpired` closes the abandoned-checkout loop.
 - Rate limiting (this change): Redis fixed-window limiter (atomic Lua), strict on auth (10/min/IP), burst shield on webhooks (120/min), fail-open on Redis outage, `RATE_LIMITED` → 429 with `Retry-After`.
@@ -243,7 +243,7 @@ enforces this at build time).
 - Web security (`f5cb286`): CORS allowlist (`FRONTEND_URL`, credentials on, never `*`), secure headers (nosniff/DENY/CSP) on every reply, SSRF guard on server-side fetches (`pkg/ssrf`, private ranges denied), CSRF-immune by construction (header JWTs, no cookies).
 - Docs + auth tolerance (`4c9d8ab`): Scalar dark reference at `/docs` (CDN, offline fallback is `/swagger`); JWT accepts bare tokens (Swagger UI sends no prefix).
 - Docker (this change): multistage `dev/staging/production` (Air loop, 77MB hardened runtime, non-root + healthcheck); worker via entrypoint override; migrations stay outside the image.
-- npm SDK (`sdk/`): `@nikhea/malawi-store-sdk` — zero-dependency TypeScript client mirroring the full `/api/v1` surface (auth, users, categories, products, variants, inventory, wishlist, cart, orders, payments, reviews) plus Malawi helpers (MWK/tambala money, 28 districts). Envelope unwrapping in the transport, coded `ApiError` passthrough from `pkg/apperr`, token getter or `setToken`. Wire types in `sdk/src/types.ts` must be updated in the same commit as any module `dto/` change.
+- npm SDK (`sdk/`): `@nikhea/malawi-store-sdk` — zero-dependency TypeScript client mirroring the full `/api/v1` surface (auth, users, categories, products, variants, inventory, wishlist, cart, orders, payments, reviews) plus money helpers (USD cents, legacy MWK) and 28 districts. Envelope unwrapping in the transport, coded `ApiError` passthrough from `pkg/apperr`, token getter or `setToken`. Wire types in `sdk/src/types.ts` must be updated in the same commit as any module `dto/` change.
 
 Rules for this section: one bullet per landed module, commit hash included,
 key decisions noted (they explain otherwise-surprising code). Keep it to

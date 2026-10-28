@@ -1948,7 +1948,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Validates ownership, converts the MWK total, reuses pending intents.",
+                "description": "Validates ownership, converts legacy MWK totals to USD, reuses pending intents.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2035,13 +2035,13 @@
                     },
                     {
                         "type": "integer",
-                        "description": "Minimum price in tambala",
+                        "description": "Minimum price in USD cents",
                         "name": "min_price_cents",
                         "in": "query"
                     },
                     {
                         "type": "integer",
-                        "description": "Maximum price in tambala",
+                        "description": "Maximum price in USD cents",
                         "name": "max_price_cents",
                         "in": "query"
                     },
@@ -2850,7 +2850,7 @@
                 },
                 "currency": {
                     "type": "string",
-                    "example": "MWK"
+                    "example": "USD"
                 },
                 "description": {
                     "type": "string",
@@ -3215,7 +3215,7 @@
             "properties": {
                 "currency": {
                     "type": "string",
-                    "example": "MWK"
+                    "example": "USD"
                 },
                 "id": {
                     "type": "string"
@@ -3315,7 +3315,7 @@
             "properties": {
                 "currency": {
                     "type": "string",
-                    "example": "MWK"
+                    "example": "USD"
                 },
                 "id": {
                     "type": "string"
@@ -3356,7 +3356,7 @@
                 },
                 "currency": {
                     "type": "string",
-                    "example": "MWK"
+                    "example": "USD"
                 },
                 "id": {
                     "type": "string"
@@ -3456,7 +3456,7 @@
                 },
                 "currency": {
                     "type": "string",
-                    "example": "MWK"
+                    "example": "USD"
                 },
                 "description": {
                     "type": "string",
@@ -3505,7 +3505,7 @@
             "properties": {
                 "currency": {
                     "type": "string",
-                    "example": "MWK"
+                    "example": "USD"
                 },
                 "id": {
                     "type": "string"

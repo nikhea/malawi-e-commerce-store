@@ -38,7 +38,7 @@ func NewService(repo Repository, products productspublic.Service, users userspub
 func toPublic(c model.Cart, items []model.Item) public.Cart {
 	lines := make([]public.Line, 0, len(items))
 	var subtotal int64
-	currency := "MWK"
+	currency := "USD"
 	for _, i := range items {
 		total := i.UnitPriceCents * int64(i.Qty)
 		subtotal += total

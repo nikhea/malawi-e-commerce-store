@@ -15,7 +15,7 @@ type ProductSummary struct {
 	Name       string `json:"name" example:"Sunseed Cooking Oil 2L"`
 	Slug       string `json:"slug" example:"sunseed-cooking-oil-2l"`
 	PriceCents int64  `json:"price_cents" example:"12500"`
-	Currency   string `json:"currency" example:"MWK"`
+	Currency   string `json:"currency" example:"USD"`
 	ImageURL   string `json:"image_url,omitempty"`
 }
 

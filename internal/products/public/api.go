@@ -12,8 +12,8 @@ import (
 	"github.com/nikhea/malawi-e-commerce-store/pkg/pagination"
 )
 
-// Product is the catalog view of an SPU. Prices are minor units
-// (tambala): 2500 = K25.00. Never floats for money.
+// Product is the catalog view of an SPU. Prices are USD cents:
+// 2500 = $25.00. Never floats for money.
 type Product struct {
 	ID           string    `json:"id" example:"3fa85f64-5717-4562-b3fc-2c963f66afa6"`
 	CategoryID   *string   `json:"category_id,omitempty"`
@@ -22,7 +22,7 @@ type Product struct {
 	Slug         string    `json:"slug" example:"sunseed-cooking-oil"`
 	Description  string    `json:"description" example:"Pure sunflower oil"`
 	PriceCents   int64     `json:"price_cents" example:"12500"`
-	Currency     string    `json:"currency" example:"MWK"`
+	Currency     string    `json:"currency" example:"USD"`
 	ImageURL     string    `json:"image_url,omitempty"`
 	IsActive     bool      `json:"is_active"`
 	CreatedAt    time.Time `json:"created_at"`

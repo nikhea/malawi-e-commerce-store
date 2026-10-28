@@ -57,7 +57,7 @@ func (fakeProducts) detail(id string) (productspublic.Detail, error) {
 		return productspublic.Detail{}, apperr.NotFound("product not found")
 	}
 	return productspublic.Detail{
-		Product: productspublic.Product{ID: "prod-1", Name: "Oil", Slug: "oil", PriceCents: 1000, Currency: "MWK"},
+		Product: productspublic.Product{ID: "prod-1", Name: "Oil", Slug: "oil", PriceCents: 1000, Currency: "USD"},
 	}, nil
 }
 

@@ -6,6 +6,10 @@
 -- empty so real Cloudinary assets can be attached later without this seed
 -- overwriting them.
 --
+-- Prices below are written in MWK tambala (the original source list) and
+-- converted to USD cents at 1 USD = 1,700 MWK when inserted. The store
+-- stores USD cents; editing a price here means editing the MWK source.
+--
 -- Apply with:
 --   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/seeds/0001_fashion_catalog.sql
 --
@@ -210,8 +214,8 @@ SELECT c.id,
        s.name,
        s.slug,
        s.description,
-       s.price_cents,
-       'MWK',
+       ROUND(s.price_cents / 1700.0)::BIGINT,
+       'USD',
        TRUE
 FROM seed_fashion_products s
 JOIN categories c ON c.slug = s.category_slug

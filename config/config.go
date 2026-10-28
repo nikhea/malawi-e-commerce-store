@@ -55,9 +55,10 @@ type Config struct {
 	StripePricePro       string
 	StripePriceScale     string
 
-	// FXMWKPerUSD converts MWK tambala to USD cents for Stripe, which
-	// cannot charge MWK. Approximate rate, env-overridable; a real FX
-	// provider plugs in here when volumes justify it.
+	// FXMWKPerUSD converts legacy MWK tambala orders to USD cents for
+	// Stripe, which cannot charge MWK. New orders are USD and bypass this
+	// rate. Approximate, env-overridable; a real FX provider plugs in here
+	// when volumes justify it.
 	FXMWKPerUSD float64
 
 	QRSigningSecret string

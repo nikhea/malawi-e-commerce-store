@@ -17,7 +17,7 @@ type Line struct {
 	Name           string  `json:"name" example:"Sunseed Cooking Oil 2L"`
 	SKU            string  `json:"sku,omitempty" example:"OIL-500-001"`
 	UnitPriceCents int64   `json:"unit_price_cents" example:"12500"`
-	Currency       string  `json:"currency" example:"MWK"`
+	Currency       string  `json:"currency" example:"USD"`
 	Qty            int     `json:"qty" example:"2"`
 	LineTotalCents int64   `json:"line_total_cents" example:"25000"`
 }
@@ -28,7 +28,7 @@ type Cart struct {
 	UserID        string    `json:"user_id"`
 	Items         []Line    `json:"items"`
 	SubtotalCents int64     `json:"subtotal_cents"`
-	Currency      string    `json:"currency" example:"MWK"`
+	Currency      string    `json:"currency" example:"USD"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 

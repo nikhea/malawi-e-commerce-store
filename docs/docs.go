@@ -1955,7 +1955,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Validates ownership, converts the MWK total, reuses pending intents.",
+                "description": "Validates ownership, converts legacy MWK totals to USD, reuses pending intents.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2042,13 +2042,13 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "Minimum price in tambala",
+                        "description": "Minimum price in USD cents",
                         "name": "min_price_cents",
                         "in": "query"
                     },
                     {
                         "type": "integer",
-                        "description": "Maximum price in tambala",
+                        "description": "Maximum price in USD cents",
                         "name": "max_price_cents",
                         "in": "query"
                     },
@@ -2857,7 +2857,7 @@ const docTemplate = `{
                 },
                 "currency": {
                     "type": "string",
-                    "example": "MWK"
+                    "example": "USD"
                 },
                 "description": {
                     "type": "string",
@@ -3222,7 +3222,7 @@ const docTemplate = `{
             "properties": {
                 "currency": {
                     "type": "string",
-                    "example": "MWK"
+                    "example": "USD"
                 },
                 "id": {
                     "type": "string"
@@ -3322,7 +3322,7 @@ const docTemplate = `{
             "properties": {
                 "currency": {
                     "type": "string",
-                    "example": "MWK"
+                    "example": "USD"
                 },
                 "id": {
                     "type": "string"
@@ -3363,7 +3363,7 @@ const docTemplate = `{
                 },
                 "currency": {
                     "type": "string",
-                    "example": "MWK"
+                    "example": "USD"
                 },
                 "id": {
                     "type": "string"
@@ -3463,7 +3463,7 @@ const docTemplate = `{
                 },
                 "currency": {
                     "type": "string",
-                    "example": "MWK"
+                    "example": "USD"
                 },
                 "description": {
                     "type": "string",
@@ -3512,7 +3512,7 @@ const docTemplate = `{
             "properties": {
                 "currency": {
                     "type": "string",
-                    "example": "MWK"
+                    "example": "USD"
                 },
                 "id": {
                     "type": "string"

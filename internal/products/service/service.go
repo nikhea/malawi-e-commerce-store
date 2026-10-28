@@ -82,7 +82,7 @@ func (s *service) Create(ctx context.Context, in public.CreateProductInput) (pub
 	}
 	currency := strings.ToUpper(strings.TrimSpace(in.Currency))
 	if currency == "" {
-		currency = "MWK"
+		currency = "USD"
 	}
 	if in.CategoryID != nil {
 		if _, err := s.categories.GetByID(ctx, *in.CategoryID); err != nil {

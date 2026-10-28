@@ -1,14 +1,14 @@
 package dto
 
-// CreateProductRequest is the POST /admin/products body. Price is minor
-// units (tambala): 12500 = K125.00.
+// CreateProductRequest is the POST /admin/products body. Price is USD
+// cents: 12500 = $125.00.
 type CreateProductRequest struct {
 	CategoryID  *string `json:"category_id,omitempty"`
 	Name        string  `json:"name" binding:"required" example:"Sunseed Cooking Oil 2L"`
 	Slug        string  `json:"slug" example:"sunseed-cooking-oil-2l"`
 	Description string  `json:"description" example:"Pure sunflower oil"`
 	PriceCents  int64   `json:"price_cents" example:"12500"`
-	Currency    string  `json:"currency" example:"MWK"`
+	Currency    string  `json:"currency" example:"USD"`
 	ImageURL    string  `json:"image_url,omitempty"`
 }
 
