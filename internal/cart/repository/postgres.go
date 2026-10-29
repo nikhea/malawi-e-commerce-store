@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -58,8 +60,52 @@ func (r *Postgres) GetOrCreateCart(ctx context.Context, userID string) (model.Ca
 }
 
 func (r *Postgres) ListItems(ctx context.Context, cartID string) ([]model.Item, error) {
-	const q = `SELECT ` + itemColumns + ` FROM cart_items WHERE cart_id = $1 ORDER BY created_at`
-	rows, err := r.pool.Query(ctx, q, cartID)
+	where, args := cartItemWhere(cartID, model.ListFilter{})
+	q := `SELECT ` + itemColumns + ` FROM cart_items WHERE ` + where + ` ORDER BY created_at, id`
+	return r.queryItems(ctx, q, args...)
+}
+
+// ListItemsPage returns one page of a cart's lines plus the total matching
+// the same filters. Limit <= 0 leaves the query unbounded.
+func (r *Postgres) ListItemsPage(ctx context.Context, cartID string, f model.ListFilter) ([]model.Item, int64, error) {
+	where, args := cartItemWhere(cartID, f)
+
+	countQ := `SELECT COUNT(*) FROM cart_items WHERE ` + where
+	var total int64
+	if err := r.pool.QueryRow(ctx, countQ, args...).Scan(&total); err != nil {
+		return nil, 0, apperr.Internal(err)
+	}
+
+	q := `SELECT ` + itemColumns + ` FROM cart_items WHERE ` + where +
+		` ORDER BY ` + cartItemOrder(f.Sort)
+	listArgs := args
+	if f.Limit > 0 {
+		listArgs = append(append([]any{}, args...), f.Limit, f.Offset)
+		q += fmt.Sprintf(` LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2)
+	}
+	items, err := r.queryItems(ctx, q, listArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
+}
+
+// Totals returns the whole cart's subtotal and currency, independent of
+// which items page the caller requested.
+func (r *Postgres) Totals(ctx context.Context, cartID string) (int64, string, error) {
+	const q = `SELECT COALESCE(SUM(unit_price_cents * qty), 0)::BIGINT,
+	                  COALESCE(MAX(currency), 'USD')
+	           FROM cart_items WHERE cart_id = $1`
+	var subtotal int64
+	var currency string
+	if err := r.pool.QueryRow(ctx, q, cartID).Scan(&subtotal, &currency); err != nil {
+		return 0, "", apperr.Internal(err)
+	}
+	return subtotal, currency, nil
+}
+
+func (r *Postgres) queryItems(ctx context.Context, q string, args ...any) ([]model.Item, error) {
+	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, apperr.Internal(err)
 	}
@@ -76,6 +122,53 @@ func (r *Postgres) ListItems(ctx context.Context, cartID string) ([]model.Item, 
 		return nil, apperr.Internal(err)
 	}
 	return out, nil
+}
+
+func cartItemWhere(cartID string, f model.ListFilter) (string, []any) {
+	clauses := []string{"cart_id = $1"}
+	args := []any{cartID}
+	add := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+	if f.Query != "" {
+		pattern := "%" + escapeLike(f.Query) + "%"
+		n := add(pattern)
+		clauses = append(clauses, fmt.Sprintf(
+			`(lower(name) LIKE lower(%s) ESCAPE '\' OR lower(sku) LIKE lower(%s) ESCAPE '\')`, n, n))
+	}
+	if f.ProductID != nil {
+		clauses = append(clauses, fmt.Sprintf("product_id = %s", add(*f.ProductID)))
+	}
+	if f.VariantID != nil {
+		clauses = append(clauses, fmt.Sprintf("variant_id = %s", add(*f.VariantID)))
+	}
+	return strings.Join(clauses, " AND "), args
+}
+
+func cartItemOrder(sortKey string) string {
+	switch sortKey {
+	case "newest":
+		return "created_at DESC, id ASC"
+	case "name_asc":
+		return "name ASC, id ASC"
+	case "name_desc":
+		return "name DESC, id ASC"
+	case "price_asc":
+		return "unit_price_cents ASC, id ASC"
+	case "price_desc":
+		return "unit_price_cents DESC, id ASC"
+	case "qty_asc":
+		return "qty ASC, id ASC"
+	case "qty_desc":
+		return "qty DESC, id ASC"
+	default: // oldest
+		return "created_at ASC, id ASC"
+	}
+}
+
+func escapeLike(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
 }
 
 // UpsertItem inserts the line or bumps qty on the same product/variant.

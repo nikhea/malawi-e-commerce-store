@@ -38,7 +38,7 @@ func New(svc public.Service, media mediapublic.Service) *Handler {
 // @Param has_products query bool false "Only categories with active products (false = empty only)"
 // @Param sort query string false "name_asc|name_desc|newest|oldest|product_count_asc|product_count_desc"
 // @Param page query int false "1-based page (wins over offset)"
-// @Param limit query int false "Page size (default 20, max 100)"
+// @Param limit query int false "Page size (default 12, max 100)"
 // @Param offset query int false "Page offset"
 // @Success 200 {object} public.CategoryListResponse
 // @Failure 400 {object} response.ErrorResponse

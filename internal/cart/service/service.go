@@ -9,6 +9,7 @@ import (
 	productspublic "github.com/nikhea/malawi-e-commerce-store/internal/products/public"
 	userspublic "github.com/nikhea/malawi-e-commerce-store/internal/users/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/pagination"
 )
 
 var _ public.Service = (*service)(nil)
@@ -17,6 +18,8 @@ var _ public.Service = (*service)(nil)
 type Repository interface {
 	GetOrCreateCart(ctx context.Context, userID string) (model.Cart, error)
 	ListItems(ctx context.Context, cartID string) ([]model.Item, error)
+	ListItemsPage(ctx context.Context, cartID string, f model.ListFilter) ([]model.Item, int64, error)
+	Totals(ctx context.Context, cartID string) (int64, string, error)
 	UpsertItem(ctx context.Context, i model.Item) (model.Item, error)
 	GetItem(ctx context.Context, cartID, itemID string) (model.Item, error)
 	SetQty(ctx context.Context, cartID, itemID string, qty int) (model.Item, error)
@@ -36,18 +39,27 @@ func NewService(repo Repository, products productspublic.Service, users userspub
 }
 
 func toPublic(c model.Cart, items []model.Item) public.Cart {
-	lines := make([]public.Line, 0, len(items))
 	var subtotal int64
 	currency := "USD"
 	for _, i := range items {
-		total := i.UnitPriceCents * int64(i.Qty)
-		subtotal += total
+		subtotal += i.UnitPriceCents * int64(i.Qty)
 		currency = i.Currency
+	}
+	return toPublicCart(c, items, subtotal, currency)
+}
+
+func toPublicCart(c model.Cart, items []model.Item, subtotal int64, currency string) public.Cart {
+	lines := make([]public.Line, 0, len(items))
+	for _, i := range items {
 		lines = append(lines, public.Line{
 			ID: i.ID, ProductID: i.ProductID, VariantID: i.VariantID,
 			Name: i.Name, SKU: i.SKU, UnitPriceCents: i.UnitPriceCents,
-			Currency: i.Currency, Qty: i.Qty, LineTotalCents: total,
+			Currency: i.Currency, Qty: i.Qty,
+			LineTotalCents: i.UnitPriceCents * int64(i.Qty),
 		})
+	}
+	if currency == "" {
+		currency = "USD"
 	}
 	return public.Cart{
 		ID: c.ID, UserID: c.UserID, Items: lines,
@@ -78,6 +90,72 @@ func (s *service) load(ctx context.Context, userID string) (model.Cart, public.C
 func (s *service) Get(ctx context.Context, userID string) (public.Cart, error) {
 	_, cart, err := s.load(ctx, userID)
 	return cart, err
+}
+
+var cartSorts = map[string]bool{
+	"oldest":     true,
+	"newest":     true,
+	"name_asc":   true,
+	"name_desc":  true,
+	"price_asc":  true,
+	"price_desc": true,
+	"qty_asc":    true,
+	"qty_desc":   true,
+}
+
+// List serves the paged GET /cart. Totals stay whole-cart totals so the
+// client's checkout summary never changes while paging through lines.
+func (s *service) List(ctx context.Context, userID string, f public.ListFilter) (public.Page, error) {
+	if f.Limit < 0 {
+		return public.Page{}, apperr.Validation("limit cannot be negative")
+	}
+	if f.Offset < 0 {
+		return public.Page{}, apperr.Validation("offset cannot be negative")
+	}
+	if f.Page < 0 {
+		return public.Page{}, apperr.Validation("page cannot be negative")
+	}
+	sortKey := strings.TrimSpace(f.Sort)
+	if sortKey == "" {
+		sortKey = "oldest"
+	}
+	if !cartSorts[sortKey] {
+		return public.Page{}, apperr.Validation("unknown sort; use oldest, newest, name_asc, name_desc, price_asc, price_desc, qty_asc or qty_desc")
+	}
+	if strings.TrimSpace(userID) == "" {
+		return public.Page{}, apperr.Validation("user id is required")
+	}
+	if _, err := s.users.GetByID(ctx, userID); err != nil {
+		return public.Page{}, err
+	}
+	cart, err := s.repo.GetOrCreateCart(ctx, userID)
+	if err != nil {
+		return public.Page{}, err
+	}
+	limit, offset := pagination.NormalizeWithDefault(f.Page, f.Limit, f.Offset, pagination.DefaultListLimit)
+	items, total, err := s.repo.ListItemsPage(ctx, cart.ID, model.ListFilter{
+		Query: strings.TrimSpace(f.Query), ProductID: trimPtr(f.ProductID),
+		VariantID: trimPtr(f.VariantID), Sort: sortKey, Limit: limit, Offset: offset,
+	})
+	if err != nil {
+		return public.Page{}, err
+	}
+	subtotal, currency, err := s.repo.Totals(ctx, cart.ID)
+	if err != nil {
+		return public.Page{}, err
+	}
+	return public.Page{
+		Cart: toPublicCart(cart, items, subtotal, currency),
+		Meta: pagination.NewMeta(total, limit, offset),
+	}, nil
+}
+
+func trimPtr(v *string) *string {
+	if v == nil || strings.TrimSpace(*v) == "" {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*v)
+	return &trimmed
 }
 
 func (s *service) AddItem(ctx context.Context, in public.AddItemInput) (public.Cart, error) {

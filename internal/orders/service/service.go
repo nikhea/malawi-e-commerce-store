@@ -10,6 +10,7 @@ import (
 	"github.com/nikhea/malawi-e-commerce-store/internal/orders/model"
 	"github.com/nikhea/malawi-e-commerce-store/internal/orders/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/pagination"
 )
 
 var _ public.Service = (*service)(nil)
@@ -18,7 +19,7 @@ var _ public.Service = (*service)(nil)
 type Repository interface {
 	Create(ctx context.Context, o model.Order, items []model.Item) (model.Order, error)
 	GetByID(ctx context.Context, orderID string) (model.Order, error)
-	ListByUser(ctx context.Context, userID string) ([]model.Order, error)
+	ListByUser(ctx context.Context, userID string, f model.ListFilter) ([]model.Order, int64, error)
 	MarkPaid(ctx context.Context, orderID string) (model.Order, error)
 	Cancel(ctx context.Context, orderID string) (model.Order, error)
 	GetItems(ctx context.Context, orderID string) ([]model.Item, error)
@@ -164,23 +165,65 @@ func (s *service) GetByRef(ctx context.Context, orderID string) (public.Order, e
 	return s.view(ctx, o)
 }
 
-func (s *service) ListMine(ctx context.Context, userID string) ([]public.Order, error) {
+var orderSorts = map[string]bool{
+	"newest":     true,
+	"oldest":     true,
+	"total_asc":  true,
+	"total_desc": true,
+}
+
+func (s *service) ListMine(ctx context.Context, userID string, f public.ListFilter) (public.Page, error) {
 	if strings.TrimSpace(userID) == "" {
-		return nil, apperr.Validation("user id is required")
+		return public.Page{}, apperr.Validation("user id is required")
 	}
-	orders, err := s.repo.ListByUser(ctx, userID)
+	if f.Limit < 0 {
+		return public.Page{}, apperr.Validation("limit cannot be negative")
+	}
+	if f.Offset < 0 {
+		return public.Page{}, apperr.Validation("offset cannot be negative")
+	}
+	if f.Page < 0 {
+		return public.Page{}, apperr.Validation("page cannot be negative")
+	}
+	status := strings.ToLower(strings.TrimSpace(f.Status))
+	switch status {
+	case "", public.StatusPending, public.StatusPaid, public.StatusCancelled:
+	default:
+		return public.Page{}, apperr.Validation("status must be pending, paid or cancelled")
+	}
+	if f.MinTotalCents != nil && f.MaxTotalCents != nil && *f.MinTotalCents > *f.MaxTotalCents {
+		return public.Page{}, apperr.Validation("min_total_cents cannot exceed max_total_cents")
+	}
+	if f.CreatedAfter != nil && f.CreatedBefore != nil && f.CreatedAfter.After(*f.CreatedBefore) {
+		return public.Page{}, apperr.Validation("created_after cannot be after created_before")
+	}
+	sortKey := strings.TrimSpace(f.Sort)
+	if sortKey == "" {
+		sortKey = "newest"
+	}
+	if !orderSorts[sortKey] {
+		return public.Page{}, apperr.Validation("unknown sort; use newest, oldest, total_asc or total_desc")
+	}
+
+	limit, offset := pagination.NormalizeWithDefault(f.Page, f.Limit, f.Offset, pagination.DefaultListLimit)
+	orders, total, err := s.repo.ListByUser(ctx, userID, model.ListFilter{
+		Status: status, Currency: strings.TrimSpace(f.Currency),
+		CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore,
+		MinTotalCents: f.MinTotalCents, MaxTotalCents: f.MaxTotalCents,
+		Sort: sortKey, Limit: limit, Offset: offset,
+	})
 	if err != nil {
-		return nil, err
+		return public.Page{}, err
 	}
 	out := make([]public.Order, 0, len(orders))
 	for _, o := range orders {
 		v, err := s.view(ctx, o)
 		if err != nil {
-			return nil, err
+			return public.Page{}, err
 		}
 		out = append(out, v)
 	}
-	return out, nil
+	return public.Page{Items: out, Meta: pagination.NewMeta(total, limit, offset)}, nil
 }
 
 func (s *service) Cancel(ctx context.Context, userID, orderID string) (public.Order, error) {

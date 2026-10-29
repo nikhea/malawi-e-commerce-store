@@ -17,3 +17,13 @@ type Review struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
+
+// ListFilter scopes a product's paged review list. The aggregate
+// (average/count) always covers every review, not just the page.
+type ListFilter struct {
+	Query  string
+	Rating *int
+	Sort   string
+	Limit  int
+	Offset int
+}

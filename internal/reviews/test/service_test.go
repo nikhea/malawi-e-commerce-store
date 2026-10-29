@@ -43,12 +43,25 @@ func (f *fakeRepo) GetByID(_ context.Context, id string) (model.Review, error) {
 	return r, nil
 }
 
-func (f *fakeRepo) ListByProduct(_ context.Context, productID string) ([]model.Review, error) {
+func (f *fakeRepo) ListByProduct(_ context.Context, productID string, filter model.ListFilter) ([]model.Review, int64, error) {
 	out := []model.Review{}
 	for _, id := range f.byProduct[productID] {
-		out = append(out, f.byID[id])
+		r := f.byID[id]
+		if filter.Rating != nil && r.Rating != *filter.Rating {
+			continue
+		}
+		out = append(out, r)
 	}
-	return out, nil
+	total := int64(len(out))
+	start := filter.Offset
+	if start > len(out) {
+		start = len(out)
+	}
+	end := len(out)
+	if filter.Limit > 0 && start+filter.Limit < end {
+		end = start + filter.Limit
+	}
+	return out[start:end], total, nil
 }
 
 func (f *fakeRepo) Stats(_ context.Context, productID string) (float64, int, error) {
@@ -198,26 +211,45 @@ func TestReviewLifecycle(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("second review: %v", err)
 	}
-	summary, err := svc.Summary(ctx, "prod-1")
+	summary, err := svc.Summary(ctx, "prod-1", public.ListFilter{})
 	if err != nil {
 		t.Fatalf("summary: %v", err)
 	}
 	if summary.Count != 2 || summary.Average != 3.0 || len(summary.Reviews) != 2 {
 		t.Fatalf("bad summary: %+v", summary)
 	}
+	if summary.Meta.Limit != 12 || summary.Meta.Total != 2 {
+		t.Fatalf("bad summary meta: %+v", summary.Meta)
+	}
+
+	// Filters narrow the page but not the aggregate.
+	rating := 2
+	filtered, err := svc.Summary(ctx, "prod-1", public.ListFilter{Rating: &rating, Limit: 1})
+	if err != nil {
+		t.Fatalf("filtered summary: %v", err)
+	}
+	if filtered.Count != 2 || filtered.Meta.Total != 1 || len(filtered.Reviews) != 1 || filtered.Reviews[0].Rating != 2 {
+		t.Fatalf("rating filter wrong: %+v", filtered)
+	}
+	if _, err := svc.Summary(ctx, "prod-1", public.ListFilter{Rating: intptr(9)}); apperr.CodeOf(err) != apperr.CodeValidation {
+		t.Fatalf("bad rating: expected VALIDATION_ERROR, got %v", err)
+	}
+	if _, err := svc.Summary(ctx, "prod-1", public.ListFilter{Sort: "random"}); apperr.CodeOf(err) != apperr.CodeValidation {
+		t.Fatalf("bad sort: expected VALIDATION_ERROR, got %v", err)
+	}
 
 	// Delete own; admin removes the other.
 	if err := svc.DeleteMine(ctx, "u1", rev.ID); err != nil {
 		t.Fatalf("delete mine: %v", err)
 	}
-	summary, err = svc.Summary(ctx, "prod-1")
+	summary, err = svc.Summary(ctx, "prod-1", public.ListFilter{})
 	if err != nil || summary.Count != 1 {
 		t.Fatalf("after delete: %v %+v", err, summary)
 	}
 	if err := svc.DeleteAny(ctx, summary.Reviews[0].ID); err != nil {
 		t.Fatalf("admin delete: %v", err)
 	}
-	summary, err = svc.Summary(ctx, "prod-1")
+	summary, err = svc.Summary(ctx, "prod-1", public.ListFilter{})
 	if err != nil || summary.Count != 0 || summary.Average != 0 {
 		t.Fatalf("empty summary wrong: %v %+v", err, summary)
 	}

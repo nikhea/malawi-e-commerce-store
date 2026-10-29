@@ -6,6 +6,8 @@ package public
 import (
 	"context"
 	"time"
+
+	"github.com/nikhea/malawi-e-commerce-store/pkg/pagination"
 )
 
 // Order statuses. pending → paid | cancelled. Terminal states never move.
@@ -38,6 +40,35 @@ type Order struct {
 	CreatedAt     time.Time   `json:"created_at"`
 }
 
+// ListFilter scopes the caller's paged order history.
+type ListFilter struct {
+	// Status narrows to pending, paid or cancelled. Empty = every status.
+	Status string
+	// Currency narrows to one ISO code (case-insensitive). Empty = all.
+	Currency      string
+	CreatedAfter  *time.Time
+	CreatedBefore *time.Time
+	MinTotalCents *int64
+	MaxTotalCents *int64
+	// Sort: newest, oldest, total_asc, total_desc. Empty means newest.
+	Sort   string
+	Page   int
+	Limit  int
+	Offset int
+}
+
+// Page is one order-history page.
+type Page struct {
+	Items []Order
+	Meta  pagination.Meta
+}
+
+// OrderListResponse is the documented wire shape for GET /orders.
+type OrderListResponse struct {
+	Data []Order         `json:"data"`
+	Meta pagination.Meta `json:"meta"`
+}
+
 // Service is the orders capability surface. Owner-scoped methods take
 // userID (from the JWT); MarkPaid/CancelByRef take the order ref for the
 // payments module (sync path until payment webhooks land).
@@ -50,8 +81,9 @@ type Service interface {
 	// GetByRef returns one order WITHOUT owner check. Trusted internal
 	// callers only (worker notifications) — never expose via HTTP.
 	GetByRef(ctx context.Context, orderID string) (Order, error)
-	// ListMine returns the caller's orders, newest first.
-	ListMine(ctx context.Context, userID string) ([]Order, error)
+	// ListMine returns one page of the caller's orders, newest first by
+	// default.
+	ListMine(ctx context.Context, userID string, f ListFilter) (Page, error)
 	// Cancel releases stock and notifies OrderCancelled. Pending only.
 	Cancel(ctx context.Context, userID, orderID string) (Order, error)
 	// MarkPaid confirms stock and notifies OrderPaid. For payments.

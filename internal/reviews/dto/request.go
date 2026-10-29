@@ -14,3 +14,13 @@ type UpdateReviewRequest struct {
 	Title  *string `json:"title,omitempty"`
 	Body   *string `json:"body,omitempty"`
 }
+
+// ListReviewsQuery binds the public product review page.
+type ListReviewsQuery struct {
+	Q      string `form:"q"`
+	Rating *int   `form:"rating"`
+	Sort   string `form:"sort"`
+	Page   int    `form:"page"`
+	Limit  int    `form:"limit"`
+	Offset int    `form:"offset"`
+}

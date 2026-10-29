@@ -6,6 +6,8 @@ package public
 import (
 	"context"
 	"time"
+
+	"github.com/nikhea/malawi-e-commerce-store/pkg/pagination"
 )
 
 // Line is one cart row with its price snapshot. Variant fields empty =
@@ -40,11 +42,43 @@ type AddItemInput struct {
 	Qty       int
 }
 
+// ListFilter scopes the paged GET /cart items. Totals on the returned
+// Cart still cover every line, not just the current page.
+type ListFilter struct {
+	// Query matches line name or SKU (case-insensitive substring).
+	Query string
+	// ProductID and VariantID narrow the visible lines.
+	ProductID *string
+	VariantID *string
+	// Sort: oldest, newest, name_asc, name_desc, price_asc, price_desc,
+	// qty_asc, qty_desc. Empty means oldest (stable cart order).
+	Sort   string
+	Page   int
+	Limit  int
+	Offset int
+}
+
+// Page is one cart-items page wrapped in the full-cart header + totals.
+type Page struct {
+	Cart Cart
+	Meta pagination.Meta
+}
+
+// CartListResponse is the documented wire shape for GET /cart.
+type CartListResponse struct {
+	Data Cart            `json:"data"`
+	Meta pagination.Meta `json:"meta"`
+}
+
 // Service is the cart capability surface. All identity comes from the
 // JWT (UserID args) — handlers never trust client-sent user ids.
 type Service interface {
-	// Get returns the active cart, creating an empty one on first use.
+	// Get returns the whole active cart, creating an empty one on first
+	// use. Internal callers (orders checkout) need every line.
 	Get(ctx context.Context, userID string) (Cart, error)
+	// List returns one page of the active cart's items plus the full-cart
+	// totals and paging counters.
+	List(ctx context.Context, userID string, f ListFilter) (Page, error)
 	// AddItem validates against the catalog, snapshots the price, and
 	// merges qty into an existing line for the same product/variant.
 	AddItem(ctx context.Context, in AddItemInput) (Cart, error)

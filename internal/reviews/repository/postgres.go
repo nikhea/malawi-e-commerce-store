@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -61,25 +63,74 @@ func (r *Postgres) GetByID(ctx context.Context, id string) (model.Review, error)
 	return scanReview(r.pool.QueryRow(ctx, q, id))
 }
 
-func (r *Postgres) ListByProduct(ctx context.Context, productID string) ([]model.Review, error) {
-	const q = `SELECT ` + reviewColumns + ` FROM reviews WHERE product_id = $1 ORDER BY created_at DESC`
-	rows, err := r.pool.Query(ctx, q, productID)
+// ListByProduct returns one filtered page of reviews plus its total.
+func (r *Postgres) ListByProduct(ctx context.Context, productID string, f model.ListFilter) ([]model.Review, int64, error) {
+	where, args := reviewWhere(productID, f)
+
+	countQ := `SELECT COUNT(*) FROM reviews WHERE ` + where
+	var total int64
+	if err := r.pool.QueryRow(ctx, countQ, args...).Scan(&total); err != nil {
+		return nil, 0, apperr.Internal(err)
+	}
+
+	listArgs := append(append([]any{}, args...), f.Limit, f.Offset)
+	q := `SELECT ` + reviewColumns + ` FROM reviews WHERE ` + where +
+		` ORDER BY ` + reviewOrder(f.Sort) +
+		fmt.Sprintf(` LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2)
+	rows, err := r.pool.Query(ctx, q, listArgs...)
 	if err != nil {
-		return nil, apperr.Internal(err)
+		return nil, 0, apperr.Internal(err)
 	}
 	defer rows.Close()
 	out := []model.Review{}
 	for rows.Next() {
 		rev, err := scanReview(rows)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		out = append(out, rev)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, apperr.Internal(err)
+		return nil, 0, apperr.Internal(err)
 	}
-	return out, nil
+	return out, total, nil
+}
+
+func reviewWhere(productID string, f model.ListFilter) (string, []any) {
+	clauses := []string{"product_id = $1"}
+	args := []any{productID}
+	add := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+	if f.Rating != nil {
+		clauses = append(clauses, fmt.Sprintf("rating = %s", add(*f.Rating)))
+	}
+	if f.Query != "" {
+		pattern := "%" + escapeLike(f.Query) + "%"
+		n := add(pattern)
+		clauses = append(clauses, fmt.Sprintf(
+			`(lower(title) LIKE lower(%s) ESCAPE '\' OR lower(body) LIKE lower(%s) ESCAPE '\' OR lower(author) LIKE lower(%s) ESCAPE '\')`,
+			n, n, n))
+	}
+	return strings.Join(clauses, " AND "), args
+}
+
+func reviewOrder(sortKey string) string {
+	switch sortKey {
+	case "oldest":
+		return "created_at ASC, id ASC"
+	case "highest":
+		return "rating DESC, created_at DESC, id ASC"
+	case "lowest":
+		return "rating ASC, created_at DESC, id ASC"
+	default: // newest
+		return "created_at DESC, id ASC"
+	}
+}
+
+func escapeLike(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
 }
 
 // Stats aggregates in SQL: one round trip, exact average.

@@ -10,3 +10,13 @@ type Item struct {
 	ProductID string
 	CreatedAt time.Time
 }
+
+// ListFilter scopes the caller's paged wishlist. Catalog fields (name,
+// slug, price, category) are joined from products at read time.
+type ListFilter struct {
+	Query      string
+	CategoryID *string
+	Sort       string
+	Limit      int
+	Offset     int
+}

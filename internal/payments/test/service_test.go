@@ -97,8 +97,8 @@ func (f *fakeOrders) GetByID(_ context.Context, userID, orderID string) (ordersp
 func (f *fakeOrders) GetByRef(_ context.Context, orderID string) (orderspublic.Order, error) {
 	return f.order(orderID)
 }
-func (f *fakeOrders) ListMine(context.Context, string) ([]orderspublic.Order, error) {
-	return nil, nil
+func (f *fakeOrders) ListMine(context.Context, string, orderspublic.ListFilter) (orderspublic.Page, error) {
+	return orderspublic.Page{}, nil
 }
 func (f *fakeOrders) Cancel(context.Context, string, string) (orderspublic.Order, error) {
 	return orderspublic.Order{}, nil

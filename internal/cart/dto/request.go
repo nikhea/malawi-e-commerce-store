@@ -12,3 +12,15 @@ type AddItemRequest struct {
 type SetQtyRequest struct {
 	Qty int `json:"qty" example:"3"`
 }
+
+// ListCartQuery binds GET /cart paging and line filters. Totals in the
+// response always cover the whole cart, not just the returned page.
+type ListCartQuery struct {
+	Q         string  `form:"q"`
+	ProductID *string `form:"product_id"`
+	VariantID *string `form:"variant_id"`
+	Sort      string  `form:"sort"`
+	Page      int     `form:"page"`
+	Limit     int     `form:"limit"`
+	Offset    int     `form:"offset"`
+}

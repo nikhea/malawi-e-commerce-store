@@ -9,6 +9,7 @@ import (
 	"github.com/nikhea/malawi-e-commerce-store/internal/reviews/public"
 	userspublic "github.com/nikhea/malawi-e-commerce-store/internal/users/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/pagination"
 )
 
 var _ public.Service = (*service)(nil)
@@ -17,7 +18,7 @@ var _ public.Service = (*service)(nil)
 type Repository interface {
 	Create(ctx context.Context, rev model.Review) (model.Review, error)
 	GetByID(ctx context.Context, id string) (model.Review, error)
-	ListByProduct(ctx context.Context, productID string) ([]model.Review, error)
+	ListByProduct(ctx context.Context, productID string, f model.ListFilter) ([]model.Review, int64, error)
 	Stats(ctx context.Context, productID string) (float64, int, error)
 	Update(ctx context.Context, rev model.Review) (model.Review, error)
 	Delete(ctx context.Context, id string) error
@@ -125,15 +126,47 @@ func (s *service) DeleteAny(ctx context.Context, reviewID string) error {
 	return s.repo.Delete(ctx, reviewID)
 }
 
-func (s *service) Summary(ctx context.Context, productID string) (public.Summary, error) {
+var reviewSorts = map[string]bool{
+	"newest":  true,
+	"oldest":  true,
+	"highest": true,
+	"lowest":  true,
+}
+
+func (s *service) Summary(ctx context.Context, productID string, f public.ListFilter) (public.Summary, error) {
 	if strings.TrimSpace(productID) == "" {
 		return public.Summary{}, apperr.Validation("product id is required")
 	}
+	if f.Limit < 0 {
+		return public.Summary{}, apperr.Validation("limit cannot be negative")
+	}
+	if f.Offset < 0 {
+		return public.Summary{}, apperr.Validation("offset cannot be negative")
+	}
+	if f.Page < 0 {
+		return public.Summary{}, apperr.Validation("page cannot be negative")
+	}
+	if f.Rating != nil && !validRating(*f.Rating) {
+		return public.Summary{}, apperr.Validation("rating must be 1–5")
+	}
+	sortKey := strings.TrimSpace(f.Sort)
+	if sortKey == "" {
+		sortKey = "newest"
+	}
+	if !reviewSorts[sortKey] {
+		return public.Summary{}, apperr.Validation("unknown sort; use newest, oldest, highest or lowest")
+	}
+
+	// Aggregate covers every review; filters only narrow the page.
 	avg, count, err := s.repo.Stats(ctx, productID)
 	if err != nil {
 		return public.Summary{}, err
 	}
-	reviews, err := s.repo.ListByProduct(ctx, productID)
+	limit, offset := pagination.NormalizeWithDefault(f.Page, f.Limit, f.Offset, pagination.DefaultListLimit)
+	reviews, total, err := s.repo.ListByProduct(ctx, productID, model.ListFilter{
+		Query: strings.TrimSpace(f.Query), Rating: f.Rating,
+		Sort: sortKey, Limit: limit, Offset: offset,
+	})
 	if err != nil {
 		return public.Summary{}, err
 	}
@@ -141,5 +174,8 @@ func (s *service) Summary(ctx context.Context, productID string) (public.Summary
 	for _, r := range reviews {
 		out = append(out, toPublic(r))
 	}
-	return public.Summary{Average: avg, Count: count, Reviews: out}, nil
+	return public.Summary{
+		Average: avg, Count: count, Reviews: out,
+		Meta: pagination.NewMeta(total, limit, offset),
+	}, nil
 }

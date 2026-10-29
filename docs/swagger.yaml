@@ -337,6 +337,13 @@ definitions:
       user_id:
         type: string
     type: object
+  public.CartListResponse:
+    properties:
+      data:
+        $ref: '#/definitions/public.Cart'
+      meta:
+        $ref: '#/definitions/pagination.Meta'
+    type: object
   public.Category:
     properties:
       created_at:
@@ -461,6 +468,15 @@ definitions:
         type: integer
       variant_id:
         type: string
+    type: object
+  public.OrderListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/public.Order'
+        type: array
+      meta:
+        $ref: '#/definitions/pagination.Meta'
     type: object
   public.Payment:
     properties:
@@ -602,6 +618,8 @@ definitions:
       count:
         example: 12
         type: integer
+      meta:
+        $ref: '#/definitions/pagination.Meta'
       reviews:
         items:
           $ref: '#/definitions/public.Review'
@@ -713,6 +731,15 @@ definitions:
       sku:
         example: OIL-500-001
         type: string
+    type: object
+  public.WishlistListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/public.Item'
+        type: array
+      meta:
+        $ref: '#/definitions/pagination.Meta'
     type: object
   response.ErrorDetail:
     properties:
@@ -1710,14 +1737,49 @@ paths:
       tags:
       - cart
     get:
-      description: Active cart with snapshot prices and computed subtotal.
+      description: |-
+        One page of active-cart lines with snapshot prices. Subtotals
+        always cover the whole cart. Sends {"data": Cart, "meta": …}.
+      parameters:
+      - description: Search line name or SKU
+        in: query
+        name: q
+        type: string
+      - description: Only lines for this product
+        in: query
+        name: product_id
+        type: string
+      - description: Only lines for this variant
+        in: query
+        name: variant_id
+        type: string
+      - description: oldest|newest|name_asc|name_desc|price_asc|price_desc|qty_asc|qty_desc
+        in: query
+        name: sort
+        type: string
+      - description: 1-based page (wins over offset)
+        in: query
+        name: page
+        type: integer
+      - description: Page size (default 12, max 100)
+        in: query
+        name: limit
+        type: integer
+      - description: Page offset
+        in: query
+        name: offset
+        type: integer
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/public.Cart'
+            $ref: '#/definitions/public.CartListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
         "401":
           description: Unauthorized
           schema:
@@ -1865,7 +1927,7 @@ paths:
         in: query
         name: page
         type: integer
-      - description: Page size (default 20, max 100)
+      - description: Page size (default 12, max 100)
         in: query
         name: limit
         type: integer
@@ -1934,15 +1996,61 @@ paths:
       - categories
   /orders:
     get:
+      description: |-
+        Caller's orders with paging and filters, newest first.
+        Sends {"data": [orders], "meta": {page, limit, …}}.
+      parameters:
+      - description: pending|paid|cancelled
+        in: query
+        name: status
+        type: string
+      - description: Filter by currency (e.g. USD)
+        in: query
+        name: currency
+        type: string
+      - description: Created at or after (RFC3339 or YYYY-MM-DD)
+        in: query
+        name: created_after
+        type: string
+      - description: Created at or before (RFC3339 or YYYY-MM-DD)
+        in: query
+        name: created_before
+        type: string
+      - description: Minimum subtotal in minor units
+        in: query
+        name: min_total_cents
+        type: integer
+      - description: Maximum subtotal in minor units
+        in: query
+        name: max_total_cents
+        type: integer
+      - description: newest|oldest|total_asc|total_desc
+        in: query
+        name: sort
+        type: string
+      - description: 1-based page (wins over offset)
+        in: query
+        name: page
+        type: integer
+      - description: Page size (default 12, max 100)
+        in: query
+        name: limit
+        type: integer
+      - description: Page offset
+        in: query
+        name: offset
+        type: integer
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/public.Order'
-            type: array
+            $ref: '#/definitions/public.OrderListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
         "401":
           description: Unauthorized
           schema:
@@ -2183,7 +2291,7 @@ paths:
         in: query
         name: page
         type: integer
-      - description: Page size (default 20, max 100)
+      - description: Page size (default 12, max 100)
         in: query
         name: limit
         type: integer
@@ -2230,13 +2338,39 @@ paths:
       - products
   /products/{id}/reviews:
     get:
-      description: 'Public page: average, count, newest-first reviews.'
+      description: |-
+        Public page: average/count over every review, newest-first
+        review page. Ships public.Summary with meta counters.
       parameters:
       - description: Product ID
         in: path
         name: id
         required: true
         type: string
+      - description: Search title, body or author
+        in: query
+        name: q
+        type: string
+      - description: Only this rating (1-5)
+        in: query
+        name: rating
+        type: integer
+      - description: newest|oldest|highest|lowest
+        in: query
+        name: sort
+        type: string
+      - description: 1-based page (wins over offset)
+        in: query
+        name: page
+        type: integer
+      - description: Page size (default 12, max 100)
+        in: query
+        name: limit
+        type: integer
+      - description: Page offset
+        in: query
+        name: offset
+        type: integer
       produces:
       - application/json
       responses:
@@ -2244,6 +2378,10 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/public.Summary'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
       summary: Product reviews + aggregate
       tags:
       - products
@@ -2524,15 +2662,45 @@ paths:
       - webhooks
   /wishlist:
     get:
+      description: |-
+        Caller's hearts with catalog snapshots, one page at a time.
+        Sends {"data": [items], "meta": {page, limit, …}}.
+      parameters:
+      - description: Search product name or slug
+        in: query
+        name: q
+        type: string
+      - description: Only products in this category
+        in: query
+        name: category_id
+        type: string
+      - description: newest|oldest|name_asc|name_desc|price_asc|price_desc
+        in: query
+        name: sort
+        type: string
+      - description: 1-based page (wins over offset)
+        in: query
+        name: page
+        type: integer
+      - description: Page size (default 12, max 100)
+        in: query
+        name: limit
+        type: integer
+      - description: Page offset
+        in: query
+        name: offset
+        type: integer
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/public.Item'
-            type: array
+            $ref: '#/definitions/public.WishlistListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
         "401":
           description: Unauthorized
           schema:

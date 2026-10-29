@@ -123,7 +123,7 @@ func (s *service) List(ctx context.Context, f public.ListFilter) (public.Page, e
 		return public.Page{}, apperr.Validation("unknown sort; use name_asc, name_desc, newest, oldest, product_count_asc or product_count_desc")
 	}
 
-	limit, offset := pagination.Normalize(f.Page, f.Limit, f.Offset)
+	limit, offset := pagination.NormalizeWithDefault(f.Page, f.Limit, f.Offset, pagination.DefaultListLimit)
 	parentID := f.ParentID
 	if parentID != nil {
 		trimmed := strings.TrimSpace(*parentID)

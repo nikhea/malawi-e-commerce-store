@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -104,25 +106,79 @@ func (r *Postgres) GetByID(ctx context.Context, orderID string) (model.Order, er
 	return scanOrder(r.pool.QueryRow(ctx, q, orderID))
 }
 
-func (r *Postgres) ListByUser(ctx context.Context, userID string) ([]model.Order, error) {
-	const q = `SELECT ` + orderColumns + ` FROM orders WHERE user_id = $1 ORDER BY created_at DESC`
-	rows, err := r.pool.Query(ctx, q, userID)
+// ListByUser returns one filtered page of the caller's orders plus the
+// total matching the same filters.
+func (r *Postgres) ListByUser(ctx context.Context, userID string, f model.ListFilter) ([]model.Order, int64, error) {
+	where, args := orderWhere(userID, f)
+
+	countQ := `SELECT COUNT(*) FROM orders WHERE ` + where
+	var total int64
+	if err := r.pool.QueryRow(ctx, countQ, args...).Scan(&total); err != nil {
+		return nil, 0, apperr.Internal(err)
+	}
+
+	listArgs := append(append([]any{}, args...), f.Limit, f.Offset)
+	q := `SELECT ` + orderColumns + ` FROM orders WHERE ` + where +
+		` ORDER BY ` + orderOrder(f.Sort) +
+		fmt.Sprintf(` LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2)
+	rows, err := r.pool.Query(ctx, q, listArgs...)
 	if err != nil {
-		return nil, apperr.Internal(err)
+		return nil, 0, apperr.Internal(err)
 	}
 	defer rows.Close()
 	out := []model.Order{}
 	for rows.Next() {
 		o, err := scanOrder(rows)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		out = append(out, o)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, apperr.Internal(err)
+		return nil, 0, apperr.Internal(err)
 	}
-	return out, nil
+	return out, total, nil
+}
+
+func orderWhere(userID string, f model.ListFilter) (string, []any) {
+	clauses := []string{"user_id = $1"}
+	args := []any{userID}
+	add := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+	if f.Status != "" {
+		clauses = append(clauses, fmt.Sprintf("status = %s", add(f.Status)))
+	}
+	if f.Currency != "" {
+		clauses = append(clauses, fmt.Sprintf("upper(currency) = %s", add(strings.ToUpper(f.Currency))))
+	}
+	if f.CreatedAfter != nil {
+		clauses = append(clauses, fmt.Sprintf("created_at >= %s", add(*f.CreatedAfter)))
+	}
+	if f.CreatedBefore != nil {
+		clauses = append(clauses, fmt.Sprintf("created_at <= %s", add(*f.CreatedBefore)))
+	}
+	if f.MinTotalCents != nil {
+		clauses = append(clauses, fmt.Sprintf("subtotal_cents >= %s", add(*f.MinTotalCents)))
+	}
+	if f.MaxTotalCents != nil {
+		clauses = append(clauses, fmt.Sprintf("subtotal_cents <= %s", add(*f.MaxTotalCents)))
+	}
+	return strings.Join(clauses, " AND "), args
+}
+
+func orderOrder(sortKey string) string {
+	switch sortKey {
+	case "oldest":
+		return "created_at ASC, id ASC"
+	case "total_asc":
+		return "subtotal_cents ASC, created_at DESC, id ASC"
+	case "total_desc":
+		return "subtotal_cents DESC, created_at DESC, id ASC"
+	default: // newest
+		return "created_at DESC, id ASC"
+	}
 }
 
 // transition moves a pending order to status, returning the order. Any

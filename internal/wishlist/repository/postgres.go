@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -49,26 +51,80 @@ func (r *Postgres) get(ctx context.Context, q string, args ...any) (model.Item, 
 	return i, nil
 }
 
-func (r *Postgres) ListByUser(ctx context.Context, userID string) ([]model.Item, error) {
-	const q = `SELECT id, user_id, product_id, created_at
-	           FROM wishlist_items WHERE user_id = $1 ORDER BY created_at DESC`
-	rows, err := r.pool.Query(ctx, q, userID)
+// ListByUser returns one filtered page of the caller's hearts plus the
+// total matching the same filters. Products are joined only for the
+// filter/sort columns; the service attaches the catalog view.
+func (r *Postgres) ListByUser(ctx context.Context, userID string, f model.ListFilter) ([]model.Item, int64, error) {
+	where, args := wishlistWhere(userID, f)
+	const from = ` FROM wishlist_items w JOIN products p ON p.id = w.product_id`
+
+	countQ := `SELECT COUNT(*)` + from + ` WHERE ` + where
+	var total int64
+	if err := r.pool.QueryRow(ctx, countQ, args...).Scan(&total); err != nil {
+		return nil, 0, apperr.Internal(err)
+	}
+
+	listArgs := append(append([]any{}, args...), f.Limit, f.Offset)
+	q := `SELECT w.id, w.user_id, w.product_id, w.created_at` + from +
+		` WHERE ` + where + ` ORDER BY ` + wishlistOrder(f.Sort) +
+		fmt.Sprintf(` LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2)
+	rows, err := r.pool.Query(ctx, q, listArgs...)
 	if err != nil {
-		return nil, apperr.Internal(err)
+		return nil, 0, apperr.Internal(err)
 	}
 	defer rows.Close()
 	out := []model.Item{}
 	for rows.Next() {
 		var i model.Item
 		if err := rows.Scan(&i.ID, &i.UserID, &i.ProductID, &i.CreatedAt); err != nil {
-			return nil, apperr.Internal(err)
+			return nil, 0, apperr.Internal(err)
 		}
 		out = append(out, i)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, apperr.Internal(err)
+		return nil, 0, apperr.Internal(err)
 	}
-	return out, nil
+	return out, total, nil
+}
+
+func wishlistWhere(userID string, f model.ListFilter) (string, []any) {
+	clauses := []string{"w.user_id = $1"}
+	args := []any{userID}
+	add := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+	if f.Query != "" {
+		pattern := "%" + escapeLike(f.Query) + "%"
+		n := add(pattern)
+		clauses = append(clauses, fmt.Sprintf(
+			`(lower(p.name) LIKE lower(%s) ESCAPE '\' OR lower(p.slug) LIKE lower(%s) ESCAPE '\')`, n, n))
+	}
+	if f.CategoryID != nil {
+		clauses = append(clauses, fmt.Sprintf("p.category_id = %s", add(*f.CategoryID)))
+	}
+	return strings.Join(clauses, " AND "), args
+}
+
+func wishlistOrder(sortKey string) string {
+	switch sortKey {
+	case "oldest":
+		return "w.created_at ASC, w.id ASC"
+	case "name_asc":
+		return "p.name ASC, w.id ASC"
+	case "name_desc":
+		return "p.name DESC, w.id ASC"
+	case "price_asc":
+		return "p.price_cents ASC, w.id ASC"
+	case "price_desc":
+		return "p.price_cents DESC, w.id ASC"
+	default: // newest
+		return "w.created_at DESC, w.id ASC"
+	}
+}
+
+func escapeLike(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
 }
 
 func (r *Postgres) Remove(ctx context.Context, userID, productID string) error {

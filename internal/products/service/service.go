@@ -186,7 +186,7 @@ func (s *service) List(ctx context.Context, f public.ListFilter) (public.Page, e
 		return public.Page{}, apperr.Validation("relevance sort requires q")
 	}
 
-	limit, offset := pagination.Normalize(f.Page, f.Limit, f.Offset)
+	limit, offset := pagination.NormalizeWithDefault(f.Page, f.Limit, f.Offset, pagination.DefaultListLimit)
 	size := strings.TrimSpace(f.Size)
 	categoryID := trimOptional(f.CategoryID)
 	categorySlug := trimOptional(f.CategorySlug)

@@ -82,8 +82,31 @@ const categories = await store.categories.listPage({
 });
 ```
 
-`page` wins over `offset` when both are sent. The API defaults to 20 rows and
-caps a page at 100.
+`page` wins over `offset` when both are sent. Storefront and shopper lists
+(products, carts, categories, orders, reviews and wishlists) default to 12
+rows; the admin user directory defaults to 20. Every page is capped at 100.
+
+The shopper lists expose the same paging envelope. Each `list()` returns rows
+only; the `*Page()` variant keeps `meta`:
+
+```ts
+const cart = await store.cart.getPage({ page: 1, sort: "newest" });
+cart.data.items; // current cart page (subtotal still covers the whole cart)
+cart.meta;       // line-level paging counters
+
+const orders = await store.orders.listPage({
+  status: "paid",
+  created_after: "2026-01-01",
+  sort: "total_desc",
+});
+const wishlist = await store.wishlist.listPage({ q: "oil", sort: "price_asc" });
+const reviews = await store.reviews.summary(productId, {
+  rating: 5,
+  sort: "highest",
+  limit: 12,
+});
+reviews.meta; // filtered review page counters
+```
 
 Every variant (both `/products/:id` detail and `/products/:id/variants`) now
 carries `available` (on-hand minus reservations) and `in_stock`, so size

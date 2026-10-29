@@ -7,6 +7,7 @@ import (
 	productspublic "github.com/nikhea/malawi-e-commerce-store/internal/products/public"
 	userspublic "github.com/nikhea/malawi-e-commerce-store/internal/users/public"
 	"github.com/nikhea/malawi-e-commerce-store/internal/wishlist/model"
+	"github.com/nikhea/malawi-e-commerce-store/internal/wishlist/public"
 	"github.com/nikhea/malawi-e-commerce-store/internal/wishlist/service"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
 )
@@ -30,14 +31,23 @@ func (f *fakeRepo) Add(_ context.Context, userID, productID string) (model.Item,
 	return i, nil
 }
 
-func (f *fakeRepo) ListByUser(_ context.Context, userID string) ([]model.Item, error) {
+func (f *fakeRepo) ListByUser(_ context.Context, userID string, filter model.ListFilter) ([]model.Item, int64, error) {
 	out := []model.Item{}
 	for _, i := range f.links {
 		if i.UserID == userID {
 			out = append(out, i)
 		}
 	}
-	return out, nil
+	total := int64(len(out))
+	start := filter.Offset
+	if start > len(out) {
+		start = len(out)
+	}
+	end := len(out)
+	if filter.Limit > 0 && start+filter.Limit < end {
+		end = start + filter.Limit
+	}
+	return out[start:end], total, nil
 }
 
 func (f *fakeRepo) Remove(_ context.Context, userID, productID string) error {
@@ -128,9 +138,15 @@ func TestWishlist(t *testing.T) {
 	if _, err := svc.Add(ctx, "u1", "prod-1"); err != nil {
 		t.Fatalf("re-add: %v", err)
 	}
-	items, err := svc.ListMine(ctx, "u1")
-	if err != nil || len(items) != 1 {
-		t.Fatalf("list: %v %+v", err, items)
+	page, err := svc.ListMine(ctx, "u1", public.ListFilter{})
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("list: %v %+v", err, page)
+	}
+	if page.Meta.Limit != 12 || page.Meta.Total != 1 {
+		t.Fatalf("bad meta: %+v", page.Meta)
+	}
+	if _, err := svc.ListMine(ctx, "u1", public.ListFilter{Sort: "random"}); apperr.CodeOf(err) != apperr.CodeValidation {
+		t.Fatalf("bad sort: expected VALIDATION_ERROR, got %v", err)
 	}
 	// Unknown product rejected.
 	if _, err := svc.Add(ctx, "u1", "ghost"); apperr.CodeOf(err) != apperr.CodeNotFound {

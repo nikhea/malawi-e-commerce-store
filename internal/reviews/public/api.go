@@ -6,6 +6,8 @@ package public
 import (
 	"context"
 	"time"
+
+	"github.com/nikhea/malawi-e-commerce-store/pkg/pagination"
 )
 
 // Review is one customer's verdict. Author snapshots users.name at write
@@ -21,11 +23,27 @@ type Review struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// Summary is the storefront aggregate + page.
+// Summary is the storefront aggregate + review page. Count and Average
+// describe every review for the product; Reviews and Meta describe the
+// (optionally filtered) page.
 type Summary struct {
-	Average float64  `json:"average" example:"4.5"`
-	Count   int      `json:"count" example:"12"`
-	Reviews []Review `json:"reviews"`
+	Average float64         `json:"average" example:"4.5"`
+	Count   int             `json:"count" example:"12"`
+	Reviews []Review        `json:"reviews"`
+	Meta    pagination.Meta `json:"meta"`
+}
+
+// ListFilter scopes the review page. The aggregate ignores these filters.
+type ListFilter struct {
+	// Query matches title, body or author (case-insensitive substring).
+	Query string
+	// Rating narrows to one 1–5 rating.
+	Rating *int
+	// Sort: newest, oldest, highest, lowest. Empty means newest.
+	Sort   string
+	Page   int
+	Limit  int
+	Offset int
 }
 
 // CreateReviewInput carries a new verdict. One per user per product.
@@ -55,6 +73,6 @@ type Service interface {
 	DeleteMine(ctx context.Context, userID, reviewID string) error
 	// DeleteAny removes any review (admin moderation).
 	DeleteAny(ctx context.Context, reviewID string) error
-	// Summary returns the public aggregate + review page for a product.
-	Summary(ctx context.Context, productID string) (Summary, error)
+	// Summary returns the public aggregate + one filtered review page.
+	Summary(ctx context.Context, productID string, f ListFilter) (Summary, error)
 }

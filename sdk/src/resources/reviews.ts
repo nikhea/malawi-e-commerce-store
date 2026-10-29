@@ -1,5 +1,11 @@
 import type { Requester } from "../http";
-import type { CreateReviewInput, Review, ReviewSummary, UpdateReviewInput } from "../types";
+import type {
+  CreateReviewInput,
+  ListReviewsParams,
+  Review,
+  ReviewSummary,
+  UpdateReviewInput,
+} from "../types";
 
 /**
  * Product reviews. `:productId` scopes create/list; `:reviewId` scopes
@@ -9,8 +15,9 @@ import type { CreateReviewInput, Review, ReviewSummary, UpdateReviewInput } from
 export class ReviewsApi {
   constructor(private readonly request: Requester) {}
 
-  summary(productId: string): Promise<ReviewSummary> {
-    return this.request("GET", `/products/${enc(productId)}/reviews`);
+  /** Public aggregate plus one filtered review page (`summary.meta`). */
+  summary(productId: string, params?: ListReviewsParams): Promise<ReviewSummary> {
+    return this.request("GET", `/products/${enc(productId)}/reviews`, { query: params });
   }
 
   create(productId: string, input: CreateReviewInput): Promise<Review> {
