@@ -4,8 +4,13 @@
 // one definition.
 package pagination
 
-// DefaultLimit is the page size when the caller omits one.
+// DefaultLimit is the page size used by admin and generic lists when the
+// caller omits one.
 const DefaultLimit = 20
+
+// DefaultListLimit is the page size used by the storefront and shopper
+// lists (products, cart, categories, orders, reviews, wishlist).
+const DefaultListLimit = 12
 
 // MaxLimit caps a page so a single request cannot pull the whole catalog.
 const MaxLimit = 100
@@ -28,8 +33,18 @@ type Meta struct {
 // 20), which keeps the two styles from disagreeing. Negativity is
 // validated by the caller so it can return a 400.
 func Normalize(page, limit, offset int) (int, int) {
+	return NormalizeWithDefault(page, limit, offset, DefaultLimit)
+}
+
+// NormalizeWithDefault is Normalize with a caller-selected default page
+// size. Modules with a different default (the customer-facing lists use
+// DefaultListLimit) call this instead of Normalize.
+func NormalizeWithDefault(page, limit, offset, defaultLimit int) (int, int) {
+	if defaultLimit <= 0 {
+		defaultLimit = DefaultLimit
+	}
 	if limit <= 0 {
-		limit = DefaultLimit
+		limit = defaultLimit
 	}
 	if limit > MaxLimit {
 		limit = MaxLimit

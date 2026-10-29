@@ -24,3 +24,14 @@ type Item struct {
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }
+
+// ListFilter scopes a paged cart-items read. Limit <= 0 means "no limit"
+// (internal callers need the whole cart for totals/checkout).
+type ListFilter struct {
+	Query     string
+	ProductID *string
+	VariantID *string
+	Sort      string
+	Limit     int
+	Offset    int
+}

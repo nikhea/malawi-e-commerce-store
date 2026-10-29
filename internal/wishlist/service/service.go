@@ -9,6 +9,7 @@ import (
 	"github.com/nikhea/malawi-e-commerce-store/internal/wishlist/model"
 	"github.com/nikhea/malawi-e-commerce-store/internal/wishlist/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/pagination"
 )
 
 var _ public.Service = (*service)(nil)
@@ -16,7 +17,7 @@ var _ public.Service = (*service)(nil)
 // Repository is the port this service needs from persistence.
 type Repository interface {
 	Add(ctx context.Context, userID, productID string) (model.Item, error)
-	ListByUser(ctx context.Context, userID string) ([]model.Item, error)
+	ListByUser(ctx context.Context, userID string, f model.ListFilter) ([]model.Item, int64, error)
 	Remove(ctx context.Context, userID, productID string) error
 }
 
@@ -71,23 +72,60 @@ func (s *service) Remove(ctx context.Context, userID, productID string) error {
 	return s.repo.Remove(ctx, userID, productID)
 }
 
-func (s *service) ListMine(ctx context.Context, userID string) ([]public.Item, error) {
+var wishlistSorts = map[string]bool{
+	"newest":     true,
+	"oldest":     true,
+	"name_asc":   true,
+	"name_desc":  true,
+	"price_asc":  true,
+	"price_desc": true,
+}
+
+func (s *service) ListMine(ctx context.Context, userID string, f public.ListFilter) (public.Page, error) {
 	if strings.TrimSpace(userID) == "" {
-		return nil, apperr.Validation("user id is required")
+		return public.Page{}, apperr.Validation("user id is required")
 	}
-	items, err := s.repo.ListByUser(ctx, userID)
+	if f.Limit < 0 {
+		return public.Page{}, apperr.Validation("limit cannot be negative")
+	}
+	if f.Offset < 0 {
+		return public.Page{}, apperr.Validation("offset cannot be negative")
+	}
+	if f.Page < 0 {
+		return public.Page{}, apperr.Validation("page cannot be negative")
+	}
+	sortKey := strings.TrimSpace(f.Sort)
+	if sortKey == "" {
+		sortKey = "newest"
+	}
+	if !wishlistSorts[sortKey] {
+		return public.Page{}, apperr.Validation("unknown sort; use newest, oldest, name_asc, name_desc, price_asc or price_desc")
+	}
+	limit, offset := pagination.NormalizeWithDefault(f.Page, f.Limit, f.Offset, pagination.DefaultListLimit)
+	items, total, err := s.repo.ListByUser(ctx, userID, model.ListFilter{
+		Query: strings.TrimSpace(f.Query), CategoryID: trimPtr(f.CategoryID),
+		Sort: sortKey, Limit: limit, Offset: offset,
+	})
 	if err != nil {
-		return nil, err
+		return public.Page{}, err
 	}
 	out := make([]public.Item, 0, len(items))
 	for _, i := range items {
 		attached, err := s.attach(ctx, i)
 		if err != nil {
-			// Product deleted between list and attach (FK cascade will
-			// clean the link): skip instead of failing the whole list.
+			// Product deleted between page and attach (FK cascade will
+			// clean the link): skip instead of failing the whole page.
 			continue
 		}
 		out = append(out, attached)
 	}
-	return out, nil
+	return public.Page{Items: out, Meta: pagination.NewMeta(total, limit, offset)}, nil
+}
+
+func trimPtr(v *string) *string {
+	if v == nil || strings.TrimSpace(*v) == "" {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*v)
+	return &trimmed
 }

@@ -47,7 +47,7 @@ func New(svc public.Service, media mediapublic.Service) *Handler {
 // @Param active_only query bool false "Hide inactive (default true)"
 // @Param sort query string false "name_asc|name_desc|price_asc|price_desc|newest|oldest|rating_asc|rating_desc|relevance (default relevance when q is set)"
 // @Param page query int false "1-based page (wins over offset)"
-// @Param limit query int false "Page size (default 20, max 100)"
+// @Param limit query int false "Page size (default 12, max 100)"
 // @Param offset query int false "Page offset"
 // @Success 200 {object} public.ProductListResponse
 // @Failure 400 {object} response.ErrorResponse

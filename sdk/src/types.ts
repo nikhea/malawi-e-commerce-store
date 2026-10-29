@@ -147,6 +147,7 @@ export type ListCategoriesParams = {
   sort?: CategorySort;
   /** 1-based page. Wins over `offset` when both are sent. */
   page?: number;
+  /** Page size (default 12, max 100). */
   limit?: number;
   offset?: number;
 };
@@ -193,6 +194,7 @@ export type ListProductsParams = {
   sort?: ProductSort;
   /** 1-based page. Wins over `offset` when both are sent. */
   page?: number;
+  /** Page size (default 12, max 100). */
   limit?: number;
   offset?: number;
 };
@@ -326,6 +328,27 @@ export type WishlistItem = {
 
 export type AddWishlistInput = { product_id: string };
 
+export type WishlistSort =
+  | "newest"
+  | "oldest"
+  | "name_asc"
+  | "name_desc"
+  | "price_asc"
+  | "price_desc";
+
+export type ListWishlistParams = {
+  /** Case-insensitive substring over product name and slug. */
+  q?: string;
+  category_id?: string;
+  sort?: WishlistSort;
+  /** 1-based page. Wins over `offset` when both are sent. */
+  page?: number;
+  limit?: number;
+  offset?: number;
+};
+
+export type WishlistListResponse = Paginated<WishlistItem>;
+
 // ---------------------------------------------------------------------------
 // cart — /api/v1/cart (JWT)
 // ---------------------------------------------------------------------------
@@ -360,6 +383,34 @@ export type AddCartItemInput = {
 
 export type SetQtyInput = { qty: number };
 
+export type CartSort =
+  | "oldest"
+  | "newest"
+  | "name_asc"
+  | "name_desc"
+  | "price_asc"
+  | "price_desc"
+  | "qty_asc"
+  | "qty_desc";
+
+export type ListCartParams = {
+  /** Case-insensitive substring over line name and SKU. */
+  q?: string;
+  product_id?: string;
+  variant_id?: string;
+  sort?: CartSort;
+  /** 1-based page. Wins over `offset` when both are sent. */
+  page?: number;
+  limit?: number;
+  offset?: number;
+};
+
+/**
+ * Paged cart envelope. `data` is the cart with its current items page;
+ * `subtotal_cents` always covers the whole cart. `meta` counts lines.
+ */
+export type CartResponse = { data: Cart; meta: PaginationMeta };
+
 // ---------------------------------------------------------------------------
 // orders — /api/v1/orders (JWT)
 // ---------------------------------------------------------------------------
@@ -383,6 +434,26 @@ export type Order = {
   lines: OrderLine[];
   created_at: string;
 };
+
+export type OrderSort = "newest" | "oldest" | "total_asc" | "total_desc";
+
+export type ListOrdersParams = {
+  status?: OrderStatus;
+  currency?: string;
+  /** RFC3339 or YYYY-MM-DD. */
+  created_after?: string;
+  /** RFC3339 or YYYY-MM-DD; a date-only value includes the whole day. */
+  created_before?: string;
+  min_total_cents?: number;
+  max_total_cents?: number;
+  sort?: OrderSort;
+  /** 1-based page. Wins over `offset` when both are sent. */
+  page?: number;
+  limit?: number;
+  offset?: number;
+};
+
+export type OrderListResponse = Paginated<Order>;
 
 // ---------------------------------------------------------------------------
 // payments — /api/v1/payments (JWT) + /api/v1/webhooks/stripe (public)
@@ -424,6 +495,22 @@ export type ReviewSummary = {
   average: number;
   count: number;
   reviews: Review[];
+  /** Counters for the filtered review page (average/count are unfiltered). */
+  meta: PaginationMeta;
+};
+
+export type ReviewSort = "newest" | "oldest" | "highest" | "lowest";
+
+export type ListReviewsParams = {
+  /** Case-insensitive substring over title, body and author. */
+  q?: string;
+  /** Only this rating (1-5). */
+  rating?: number;
+  sort?: ReviewSort;
+  /** 1-based page. Wins over `offset` when both are sent. */
+  page?: number;
+  limit?: number;
+  offset?: number;
 };
 
 export type CreateReviewInput = { rating: number; title?: string; body?: string };

@@ -1,5 +1,5 @@
 import type { Requester } from "../http";
-import type { Order } from "../types";
+import type { ListOrdersParams, Order, OrderListResponse } from "../types";
 
 /**
  * /api/v1/orders — JWT required. Checkout takes NO body: it freezes the
@@ -13,9 +13,14 @@ export class OrdersApi {
     return this.request("POST", "/orders/checkout");
   }
 
-  /** Own orders, newest first (no pagination on the API). */
-  list(): Promise<Order[]> {
-    return this.request("GET", "/orders");
+  /** Own orders, newest first (paging metadata is dropped). */
+  list(params?: ListOrdersParams): Promise<Order[]> {
+    return this.request("GET", "/orders", { query: params });
+  }
+
+  /** Same filters as `list`, plus the `meta` paging counters. */
+  listPage(params?: ListOrdersParams): Promise<OrderListResponse> {
+    return this.request("GET", "/orders", { query: params, raw: true });
   }
 
   get(id: string): Promise<Order> {

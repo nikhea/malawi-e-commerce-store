@@ -26,6 +26,29 @@ func TestNormalize(t *testing.T) {
 	}
 }
 
+func TestNormalizeWithDefault(t *testing.T) {
+	tests := []struct {
+		name                  string
+		page, limit, offset   int
+		defaultLimit          int
+		wantLimit, wantOffset int
+	}{
+		{"custom default", 0, 0, 0, 12, 12, 0},
+		{"caller limit wins", 0, 5, 0, 12, 5, 0},
+		{"page uses custom default", 2, 0, 0, 12, 12, 12},
+		{"zero default falls back", 0, 0, 0, 0, DefaultLimit, 0},
+		{"cap still applies", 0, 500, 0, 12, MaxLimit, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			limit, offset := NormalizeWithDefault(tt.page, tt.limit, tt.offset, tt.defaultLimit)
+			if limit != tt.wantLimit || offset != tt.wantOffset {
+				t.Fatalf("got limit=%d offset=%d, want limit=%d offset=%d", limit, offset, tt.wantLimit, tt.wantOffset)
+			}
+		})
+	}
+}
+
 func TestNewMeta(t *testing.T) {
 	tests := []struct {
 		name                string

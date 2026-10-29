@@ -21,20 +21,37 @@ func New(svc public.Service) *Handler {
 
 // Get godoc
 // @Summary Get my cart
-// @Description Active cart with snapshot prices and computed subtotal.
+// @Description One page of active-cart lines with snapshot prices. Subtotals
+// @Description always cover the whole cart. Sends {"data": Cart, "meta": …}.
 // @Tags cart
 // @Produce json
-// @Success 200 {object} public.Cart
+// @Param q query string false "Search line name or SKU"
+// @Param product_id query string false "Only lines for this product"
+// @Param variant_id query string false "Only lines for this variant"
+// @Param sort query string false "oldest|newest|name_asc|name_desc|price_asc|price_desc|qty_asc|qty_desc"
+// @Param page query int false "1-based page (wins over offset)"
+// @Param limit query int false "Page size (default 12, max 100)"
+// @Param offset query int false "Page offset"
+// @Success 200 {object} public.CartListResponse
+// @Failure 400 {object} response.ErrorResponse
 // @Failure 401 {object} response.ErrorResponse
 // @Security BearerAuth
 // @Router /cart [get]
 func (h *Handler) Get(c *gin.Context) {
-	cart, err := h.svc.Get(c.Request.Context(), middleware.UserIDOf(c))
+	var q dto.ListCartQuery
+	if err := c.ShouldBindQuery(&q); err != nil {
+		response.Error(c, apperr.Validation("invalid query"))
+		return
+	}
+	page, err := h.svc.List(c.Request.Context(), middleware.UserIDOf(c), public.ListFilter{
+		Query: q.Q, ProductID: q.ProductID, VariantID: q.VariantID,
+		Sort: q.Sort, Page: q.Page, Limit: q.Limit, Offset: q.Offset,
+	})
 	if err != nil {
 		response.Error(c, err)
 		return
 	}
-	response.OK(c, cart)
+	response.OKMeta(c, page.Cart, page.Meta)
 }
 
 // AddItem godoc

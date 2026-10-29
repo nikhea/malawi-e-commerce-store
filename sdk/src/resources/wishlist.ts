@@ -1,5 +1,5 @@
 import type { Requester } from "../http";
-import type { OpStatus, WishlistItem } from "../types";
+import type { ListWishlistParams, OpStatus, WishlistItem, WishlistListResponse } from "../types";
 
 /**
  * /api/v1/wishlist — JWT required, idempotent hearts.
@@ -9,8 +9,14 @@ import type { OpStatus, WishlistItem } from "../types";
 export class WishlistApi {
   constructor(private readonly request: Requester) {}
 
-  list(): Promise<WishlistItem[]> {
-    return this.request("GET", "/wishlist");
+  /** Newest first (paging metadata is dropped). */
+  list(params?: ListWishlistParams): Promise<WishlistItem[]> {
+    return this.request("GET", "/wishlist", { query: params });
+  }
+
+  /** Same filters as `list`, plus the `meta` paging counters. */
+  listPage(params?: ListWishlistParams): Promise<WishlistListResponse> {
+    return this.request("GET", "/wishlist", { query: params, raw: true });
   }
 
   add(productId: string): Promise<WishlistItem> {

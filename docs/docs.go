@@ -1510,7 +1510,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Active cart with snapshot prices and computed subtotal.",
+                "description": "One page of active-cart lines with snapshot prices. Subtotals\nalways cover the whole cart. Sends {\"data\": Cart, \"meta\": …}.",
                 "produces": [
                     "application/json"
                 ],
@@ -1518,11 +1518,61 @@ const docTemplate = `{
                     "cart"
                 ],
                 "summary": "Get my cart",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Search line name or SKU",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Only lines for this product",
+                        "name": "product_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Only lines for this variant",
+                        "name": "variant_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "oldest|newest|name_asc|name_desc|price_asc|price_desc|qty_asc|qty_desc",
+                        "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "1-based page (wins over offset)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size (default 12, max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page offset",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/public.Cart"
+                            "$ref": "#/definitions/public.CartListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
                         }
                     },
                     "401": {
@@ -1778,7 +1828,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "Page size (default 20, max 100)",
+                        "description": "Page size (default 12, max 100)",
                         "name": "limit",
                         "in": "query"
                     },
@@ -1881,6 +1931,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Caller's orders with paging and filters, newest first.\nSends {\"data\": [orders], \"meta\": {page, limit, …}}.",
                 "produces": [
                     "application/json"
                 ],
@@ -1888,14 +1939,79 @@ const docTemplate = `{
                     "orders"
                 ],
                 "summary": "List my orders",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "pending|paid|cancelled",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by currency (e.g. USD)",
+                        "name": "currency",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Created at or after (RFC3339 or YYYY-MM-DD)",
+                        "name": "created_after",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Created at or before (RFC3339 or YYYY-MM-DD)",
+                        "name": "created_before",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Minimum subtotal in minor units",
+                        "name": "min_total_cents",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum subtotal in minor units",
+                        "name": "max_total_cents",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "newest|oldest|total_asc|total_desc",
+                        "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "1-based page (wins over offset)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size (default 12, max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page offset",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/public.Order"
-                            }
+                            "$ref": "#/definitions/public.OrderListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
                         }
                     },
                     "401": {
@@ -2264,7 +2380,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "Page size (default 20, max 100)",
+                        "description": "Page size (default 12, max 100)",
                         "name": "limit",
                         "in": "query"
                     },
@@ -2363,7 +2479,7 @@ const docTemplate = `{
         },
         "/products/{id}/reviews": {
             "get": {
-                "description": "Public page: average, count, newest-first reviews.",
+                "description": "Public page: average/count over every review, newest-first\nreview page. Ships public.Summary with meta counters.",
                 "produces": [
                     "application/json"
                 ],
@@ -2378,6 +2494,42 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Search title, body or author",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Only this rating (1-5)",
+                        "name": "rating",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "newest|oldest|highest|lowest",
+                        "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "1-based page (wins over offset)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size (default 12, max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page offset",
+                        "name": "offset",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -2385,6 +2537,12 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/public.Summary"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
                         }
                     }
                 }
@@ -2786,6 +2944,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "description": "Caller's hearts with catalog snapshots, one page at a time.\nSends {\"data\": [items], \"meta\": {page, limit, …}}.",
                 "produces": [
                     "application/json"
                 ],
@@ -2793,14 +2952,55 @@ const docTemplate = `{
                     "wishlist"
                 ],
                 "summary": "List my wishlist",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Search product name or slug",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Only products in this category",
+                        "name": "category_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "newest|oldest|name_asc|name_desc|price_asc|price_desc",
+                        "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "1-based page (wins over offset)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size (default 12, max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page offset",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/public.Item"
-                            }
+                            "$ref": "#/definitions/public.WishlistListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
                         }
                     },
                     "401": {
@@ -3406,6 +3606,17 @@ const docTemplate = `{
                 }
             }
         },
+        "public.CartListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/public.Cart"
+                },
+                "meta": {
+                    "$ref": "#/definitions/pagination.Meta"
+                }
+            }
+        },
         "public.Category": {
             "type": "object",
             "properties": {
@@ -3588,6 +3799,20 @@ const docTemplate = `{
                 },
                 "variant_id": {
                     "type": "string"
+                }
+            }
+        },
+        "public.OrderListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.Order"
+                    }
+                },
+                "meta": {
+                    "$ref": "#/definitions/pagination.Meta"
                 }
             }
         },
@@ -3791,6 +4016,9 @@ const docTemplate = `{
                     "type": "integer",
                     "example": 12
                 },
+                "meta": {
+                    "$ref": "#/definitions/pagination.Meta"
+                },
                 "reviews": {
                     "type": "array",
                     "items": {
@@ -3946,6 +4174,20 @@ const docTemplate = `{
                 "sku": {
                     "type": "string",
                     "example": "OIL-500-001"
+                }
+            }
+        },
+        "public.WishlistListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.Item"
+                    }
+                },
+                "meta": {
+                    "$ref": "#/definitions/pagination.Meta"
                 }
             }
         },

@@ -121,7 +121,7 @@ func TestListFiltersAndPagination(t *testing.T) {
 	if err != nil {
 		t.Fatalf("default list: %v", err)
 	}
-	if page.Meta.Limit != 20 || repo.lastFilter.Sort != "name_asc" {
+	if page.Meta.Limit != 12 || repo.lastFilter.Sort != "name_asc" {
 		t.Fatalf("bad defaults: meta=%+v filter=%+v", page.Meta, repo.lastFilter)
 	}
 }

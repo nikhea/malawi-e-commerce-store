@@ -2,6 +2,7 @@ package test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -26,7 +27,7 @@ func newFakeRepo() *fakeRepo {
 
 func (f *fakeRepo) Create(_ context.Context, o model.Order, items []model.Item) (model.Order, error) {
 	f.seq++
-	o.ID = "order-n"
+	o.ID = fmt.Sprintf("order-%d", f.seq)
 	o.Status = public.StatusPending
 	f.orders[o.ID] = o
 	f.items[o.ID] = items
@@ -41,14 +42,27 @@ func (f *fakeRepo) GetByID(_ context.Context, id string) (model.Order, error) {
 	return o, nil
 }
 
-func (f *fakeRepo) ListByUser(_ context.Context, userID string) ([]model.Order, error) {
-	out := []model.Order{}
+func (f *fakeRepo) ListByUser(_ context.Context, userID string, filter model.ListFilter) ([]model.Order, int64, error) {
+	all := []model.Order{}
 	for _, o := range f.orders {
-		if o.UserID == userID {
-			out = append(out, o)
+		if o.UserID != userID {
+			continue
 		}
+		if filter.Status != "" && o.Status != filter.Status {
+			continue
+		}
+		all = append(all, o)
 	}
-	return out, nil
+	total := int64(len(all))
+	start := filter.Offset
+	if start > len(all) {
+		start = len(all)
+	}
+	end := len(all)
+	if filter.Limit > 0 && start+filter.Limit < end {
+		end = start + filter.Limit
+	}
+	return all[start:end], total, nil
 }
 
 func (f *fakeRepo) transition(id, status string) (model.Order, error) {
@@ -97,6 +111,9 @@ func (f *fakeCart) Get(_ context.Context, userID string) (cartpublic.Cart, error
 
 func (f *fakeCart) AddItem(context.Context, cartpublic.AddItemInput) (cartpublic.Cart, error) {
 	return cartpublic.Cart{}, nil
+}
+func (f *fakeCart) List(context.Context, string, cartpublic.ListFilter) (cartpublic.Page, error) {
+	return cartpublic.Page{}, nil
 }
 func (f *fakeCart) SetQty(context.Context, string, string, int) (cartpublic.Cart, error) {
 	return cartpublic.Cart{}, nil
@@ -215,13 +232,53 @@ func TestCheckout(t *testing.T) {
 		if fx.cart.cleared {
 			t.Fatal("cart cleared despite failed reserve")
 		}
-		orders, _ := fx.svc.ListMine(ctx, "u1")
-		for _, o := range orders {
+		page, _ := fx.svc.ListMine(ctx, "u1", public.ListFilter{})
+		for _, o := range page.Items {
 			if o.Status == public.StatusPending {
 				t.Fatalf("orphan pending order: %+v", o)
 			}
 		}
 	})
+}
+
+func TestListMineFiltersAndPaging(t *testing.T) {
+	ctx := context.Background()
+	fx := newFixture()
+	for i := 0; i < 13; i++ {
+		if _, err := fx.svc.Checkout(ctx, "u1"); err != nil {
+			t.Fatalf("checkout %d: %v", i, err)
+		}
+	}
+	page, err := fx.svc.ListMine(ctx, "u1", public.ListFilter{})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if page.Meta.Limit != 12 || page.Meta.Total != 13 || len(page.Items) != 12 {
+		t.Fatalf("bad page: meta=%+v rows=%d", page.Meta, len(page.Items))
+	}
+
+	first := page.Items[0]
+	if _, err := fx.svc.MarkPaid(ctx, first.ID); err != nil {
+		t.Fatalf("pay: %v", err)
+	}
+	paid, err := fx.svc.ListMine(ctx, "u1", public.ListFilter{Status: public.StatusPaid})
+	if err != nil {
+		t.Fatalf("paid list: %v", err)
+	}
+	if paid.Meta.Total != 1 || len(paid.Items) != 1 || paid.Items[0].ID != first.ID {
+		t.Fatalf("status filter wrong: %+v", paid)
+	}
+
+	if _, err := fx.svc.ListMine(ctx, "u1", public.ListFilter{Status: "refunded"}); apperr.CodeOf(err) != apperr.CodeValidation {
+		t.Fatalf("bad status: expected VALIDATION_ERROR, got %v", err)
+	}
+	min, max := int64(10), int64(1)
+	if _, err := fx.svc.ListMine(ctx, "u1", public.ListFilter{MinTotalCents: &min, MaxTotalCents: &max}); apperr.CodeOf(err) != apperr.CodeValidation {
+		t.Fatalf("bad totals: expected VALIDATION_ERROR, got %v", err)
+	}
+	if _, err := fx.svc.ListMine(ctx, "u1", public.ListFilter{Sort: "random"}); apperr.CodeOf(err) != apperr.CodeValidation {
+		t.Fatalf("bad sort: expected VALIDATION_ERROR, got %v", err)
+	}
 }
 
 func TestPayCancel(t *testing.T) {

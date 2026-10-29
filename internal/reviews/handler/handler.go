@@ -20,14 +20,30 @@ func New(svc public.Service) *Handler {
 
 // Summary godoc
 // @Summary Product reviews + aggregate
-// @Description Public page: average, count, newest-first reviews.
+// @Description Public page: average/count over every review, newest-first
+// @Description review page. Ships public.Summary with meta counters.
 // @Tags products
 // @Produce json
 // @Param id path string true "Product ID"
+// @Param q query string false "Search title, body or author"
+// @Param rating query int false "Only this rating (1-5)"
+// @Param sort query string false "newest|oldest|highest|lowest"
+// @Param page query int false "1-based page (wins over offset)"
+// @Param limit query int false "Page size (default 12, max 100)"
+// @Param offset query int false "Page offset"
 // @Success 200 {object} public.Summary
+// @Failure 400 {object} response.ErrorResponse
 // @Router /products/{id}/reviews [get]
 func (h *Handler) Summary(c *gin.Context) {
-	summary, err := h.svc.Summary(c.Request.Context(), c.Param("id"))
+	var q dto.ListReviewsQuery
+	if err := c.ShouldBindQuery(&q); err != nil {
+		response.Error(c, apperr.Validation("invalid query"))
+		return
+	}
+	summary, err := h.svc.Summary(c.Request.Context(), c.Param("id"), public.ListFilter{
+		Query: q.Q, Rating: q.Rating, Sort: q.Sort,
+		Page: q.Page, Limit: q.Limit, Offset: q.Offset,
+	})
 	if err != nil {
 		response.Error(c, err)
 		return

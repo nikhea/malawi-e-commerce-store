@@ -41,6 +41,30 @@ func (f *fakeRepo) ListItems(_ context.Context, cartID string) ([]model.Item, er
 	return f.items[cartID], nil
 }
 
+func (f *fakeRepo) ListItemsPage(_ context.Context, cartID string, filter model.ListFilter) ([]model.Item, int64, error) {
+	all := f.items[cartID]
+	total := int64(len(all))
+	start := filter.Offset
+	if start > len(all) {
+		start = len(all)
+	}
+	end := len(all)
+	if filter.Limit > 0 && start+filter.Limit < end {
+		end = start + filter.Limit
+	}
+	return append([]model.Item{}, all[start:end]...), total, nil
+}
+
+func (f *fakeRepo) Totals(_ context.Context, cartID string) (int64, string, error) {
+	var subtotal int64
+	currency := "USD"
+	for _, i := range f.items[cartID] {
+		subtotal += i.UnitPriceCents * int64(i.Qty)
+		currency = i.Currency
+	}
+	return subtotal, currency, nil
+}
+
 func (f *fakeRepo) UpsertItem(_ context.Context, i model.Item) (model.Item, error) {
 	for n, e := range f.items[i.CartID] {
 		if e.ProductID == i.ProductID && ptrStr(e.VariantID) == ptrStr(i.VariantID) {
@@ -227,6 +251,31 @@ func TestGuardrails(t *testing.T) {
 	}
 	if _, err := svc.AddItem(ctx, public.AddItemInput{UserID: "u1", ProductID: "prod-1", Qty: 0}); apperr.CodeOf(err) != apperr.CodeValidation {
 		t.Fatalf("zero qty: expected VALIDATION_ERROR, got %v", err)
+	}
+}
+
+func TestListPagination(t *testing.T) {
+	ctx := context.Background()
+	svc := newService()
+	for i := 0; i < 13; i++ {
+		if _, err := svc.AddItem(ctx, public.AddItemInput{UserID: "u1", ProductID: "prod-1", Qty: 1}); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	page, err := svc.List(ctx, "u1", public.ListFilter{})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if page.Meta.Limit != 12 || page.Meta.Total != 1 {
+		t.Fatalf("bad meta: %+v", page.Meta)
+	}
+	// One merged line, so a 12-item cap is not observable here — totals
+	// still cover the whole cart regardless of the page.
+	if page.Cart.SubtotalCents != 13000 || len(page.Cart.Items) != 1 {
+		t.Fatalf("bad page cart: %+v", page.Cart)
+	}
+	if _, err := svc.List(ctx, "u1", public.ListFilter{Sort: "random"}); apperr.CodeOf(err) != apperr.CodeValidation {
+		t.Fatalf("unknown sort: expected VALIDATION_ERROR, got %v", err)
 	}
 }
 

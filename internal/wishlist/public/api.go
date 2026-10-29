@@ -5,6 +5,8 @@ package public
 import (
 	"context"
 	"time"
+
+	"github.com/nikhea/malawi-e-commerce-store/pkg/pagination"
 )
 
 // ProductSummary is the flat catalog snapshot embedded in each item.
@@ -26,12 +28,39 @@ type Item struct {
 	AddedAt   time.Time      `json:"added_at"`
 }
 
+// ListFilter scopes the caller's wishlist page.
+type ListFilter struct {
+	// Query matches product name or slug (case-insensitive substring).
+	Query string
+	// CategoryID narrows to products in one category.
+	CategoryID *string
+	// Sort: newest, oldest, name_asc, name_desc, price_asc, price_desc.
+	// Empty means newest.
+	Sort   string
+	Page   int
+	Limit  int
+	Offset int
+}
+
+// Page is one wishlist page.
+type Page struct {
+	Items []Item
+	Meta  pagination.Meta
+}
+
+// WishlistListResponse is the documented wire shape for GET /wishlist.
+type WishlistListResponse struct {
+	Data []Item          `json:"data"`
+	Meta pagination.Meta `json:"meta"`
+}
+
 // Service is the wishlist capability surface. All identity from the JWT.
 type Service interface {
 	// Add hearts a product. Idempotent: re-hearting succeeds silently.
 	Add(ctx context.Context, userID, productID string) (Item, error)
 	// Remove unhearts. Unknown link = NOT_FOUND.
 	Remove(ctx context.Context, userID, productID string) error
-	// ListMine returns the caller's wishlist, newest first.
-	ListMine(ctx context.Context, userID string) ([]Item, error)
+	// ListMine returns one page of the caller's wishlist, newest first
+	// by default.
+	ListMine(ctx context.Context, userID string, f ListFilter) (Page, error)
 }

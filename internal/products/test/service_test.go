@@ -209,7 +209,7 @@ func TestListPaginationAndFilters(t *testing.T) {
 		if err != nil {
 			t.Fatalf("list: %v", err)
 		}
-		if page.Meta.Page != 1 || page.Meta.Limit != 20 || page.Meta.Offset != 0 || page.Meta.Total != 2 {
+		if page.Meta.Page != 1 || page.Meta.Limit != 12 || page.Meta.Offset != 0 || page.Meta.Total != 2 {
 			t.Fatalf("bad meta: %+v", page.Meta)
 		}
 		if page.Meta.TotalPages != 1 || page.Meta.HasNext || page.Meta.HasPrev {

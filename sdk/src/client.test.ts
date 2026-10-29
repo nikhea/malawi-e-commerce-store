@@ -199,4 +199,39 @@ describe("catalog filters and pagination", () => {
     expect(page.meta.total).toBe(41);
     expect(page.data).toHaveLength(1);
   });
+
+  it("serializes cart, order, wishlist and review filters", async () => {
+    const { calls, impl } = stubFetch(() =>
+      JSON_RESPONSE({
+        data: { items: [], reviews: [], average: 0, count: 0 },
+        meta: META,
+      }),
+    );
+    const store = new MalawiStoreClient({ fetchImpl: impl });
+
+    await store.cart.getPage({ q: "oil", sort: "price_desc", page: 2, limit: 12 });
+    await store.orders.listPage({ status: "paid", sort: "total_desc", limit: 12 });
+    await store.wishlist.listPage({ category_id: "c1", sort: "name_asc" });
+    await store.reviews.summary("p1", { rating: 5, sort: "highest", limit: 12 });
+
+    const cartURL = new URL(calls[0].url);
+    expect(cartURL.pathname).toBe("/api/v1/cart");
+    expect(cartURL.searchParams.get("q")).toBe("oil");
+    expect(cartURL.searchParams.get("sort")).toBe("price_desc");
+    expect(cartURL.searchParams.get("page")).toBe("2");
+
+    const orderURL = new URL(calls[1].url);
+    expect(orderURL.pathname).toBe("/api/v1/orders");
+    expect(orderURL.searchParams.get("status")).toBe("paid");
+    expect(orderURL.searchParams.get("sort")).toBe("total_desc");
+
+    const wishlistURL = new URL(calls[2].url);
+    expect(wishlistURL.pathname).toBe("/api/v1/wishlist");
+    expect(wishlistURL.searchParams.get("category_id")).toBe("c1");
+
+    const reviewURL = new URL(calls[3].url);
+    expect(reviewURL.pathname).toBe("/api/v1/products/p1/reviews");
+    expect(reviewURL.searchParams.get("rating")).toBe("5");
+    expect(reviewURL.searchParams.get("sort")).toBe("highest");
+  });
 });

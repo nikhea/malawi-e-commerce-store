@@ -24,3 +24,16 @@ type Item struct {
 	UnitPriceCents int64
 	Qty            int
 }
+
+// ListFilter scopes the caller's paged order history.
+type ListFilter struct {
+	Status        string
+	Currency      string
+	CreatedAfter  *time.Time
+	CreatedBefore *time.Time
+	MinTotalCents *int64
+	MaxTotalCents *int64
+	Sort          string
+	Limit         int
+	Offset        int
+}
