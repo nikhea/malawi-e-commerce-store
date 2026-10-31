@@ -174,6 +174,13 @@ func (s *service) AddItem(ctx context.Context, in public.AddItemInput) (public.C
 	if !detail.Product.IsActive {
 		return public.Cart{}, apperr.Conflict("product is not available")
 	}
+	// Stock is tracked per variant, not on the base product, so a
+	// variant-less line has nothing to reserve at checkout. Require the
+	// SKU whenever the product has one; base-price lines stay valid for
+	// products that genuinely have no variants.
+	if in.VariantID == nil && len(detail.Variants) > 0 {
+		return public.Cart{}, apperr.Validation("variant id is required for this product")
+	}
 	name, sku, price := detail.Product.Name, "", detail.Product.PriceCents
 	if in.VariantID != nil {
 		v, ok := findVariant(detail.Variants, *in.VariantID)

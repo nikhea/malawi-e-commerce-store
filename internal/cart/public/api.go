@@ -34,7 +34,8 @@ type Cart struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
-// AddItemInput carries a new line. VariantID nil = base product price.
+// AddItemInput carries a new line. VariantID nil = base product price,
+// valid only for products with no variants (stock is tracked per SKU).
 type AddItemInput struct {
 	UserID    string
 	ProductID string

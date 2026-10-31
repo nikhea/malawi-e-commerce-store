@@ -122,7 +122,8 @@ func (f *fakeRepo) Clear(_ context.Context, cartID string) error {
 
 func (f *fakeRepo) Touch(_ context.Context, _ string) error { return nil }
 
-// fakeProducts serves one active product with one variant, one inactive.
+// fakeProducts serves one active product with one variant, one active
+// product with no variants, and one inactive product.
 type fakeProducts struct{}
 
 func detailFor(id string) (productspublic.Detail, error) {
@@ -131,6 +132,10 @@ func detailFor(id string) (productspublic.Detail, error) {
 		return productspublic.Detail{
 			Product:  productspublic.Product{ID: "prod-1", Name: "Oil", PriceCents: 1000, Currency: "USD", IsActive: true},
 			Variants: []productspublic.VariantView{{ID: "var-1", Name: "500ml", SKU: "OIL-500", PriceCents: 2500, IsActive: true}},
+		}, nil
+	case "prod-simple":
+		return productspublic.Detail{
+			Product: productspublic.Product{ID: "prod-simple", Name: "Soap", PriceCents: 1000, Currency: "USD", IsActive: true},
 		}, nil
 	case "prod-off":
 		return productspublic.Detail{
@@ -200,8 +205,8 @@ func TestAddAndMerge(t *testing.T) {
 	ctx := context.Background()
 	svc := newService()
 
-	// Base product snapshots base price.
-	cart, err := svc.AddItem(ctx, public.AddItemInput{UserID: "u1", ProductID: "prod-1", Qty: 1})
+	// Base product with no variants snapshots base price.
+	cart, err := svc.AddItem(ctx, public.AddItemInput{UserID: "u1", ProductID: "prod-simple", Qty: 1})
 	if err != nil {
 		t.Fatalf("add: %v", err)
 	}
@@ -210,7 +215,7 @@ func TestAddAndMerge(t *testing.T) {
 	}
 
 	// Same line merges qty instead of duplicating.
-	cart, err = svc.AddItem(ctx, public.AddItemInput{UserID: "u1", ProductID: "prod-1", Qty: 2})
+	cart, err = svc.AddItem(ctx, public.AddItemInput{UserID: "u1", ProductID: "prod-simple", Qty: 2})
 	if err != nil {
 		t.Fatalf("re-add: %v", err)
 	}
@@ -242,14 +247,17 @@ func TestGuardrails(t *testing.T) {
 	if _, err := svc.AddItem(ctx, public.AddItemInput{UserID: "u1", ProductID: "prod-off", Qty: 1}); apperr.CodeOf(err) != apperr.CodeConflict {
 		t.Fatalf("inactive product: expected CONFLICT, got %v", err)
 	}
+	if _, err := svc.AddItem(ctx, public.AddItemInput{UserID: "u1", ProductID: "prod-1", Qty: 1}); apperr.CodeOf(err) != apperr.CodeValidation {
+		t.Fatalf("variant product without variant: expected VALIDATION_ERROR, got %v", err)
+	}
 	badVariant := "nope"
 	if _, err := svc.AddItem(ctx, public.AddItemInput{UserID: "u1", ProductID: "prod-1", VariantID: &badVariant, Qty: 1}); apperr.CodeOf(err) != apperr.CodeNotFound {
 		t.Fatalf("unknown variant: expected NOT_FOUND, got %v", err)
 	}
-	if _, err := svc.AddItem(ctx, public.AddItemInput{UserID: "ghost", ProductID: "prod-1", Qty: 1}); apperr.CodeOf(err) != apperr.CodeNotFound {
+	if _, err := svc.AddItem(ctx, public.AddItemInput{UserID: "ghost", ProductID: "prod-simple", Qty: 1}); apperr.CodeOf(err) != apperr.CodeNotFound {
 		t.Fatalf("unknown user: expected NOT_FOUND, got %v", err)
 	}
-	if _, err := svc.AddItem(ctx, public.AddItemInput{UserID: "u1", ProductID: "prod-1", Qty: 0}); apperr.CodeOf(err) != apperr.CodeValidation {
+	if _, err := svc.AddItem(ctx, public.AddItemInput{UserID: "u1", ProductID: "prod-simple", Qty: 0}); apperr.CodeOf(err) != apperr.CodeValidation {
 		t.Fatalf("zero qty: expected VALIDATION_ERROR, got %v", err)
 	}
 }
@@ -258,7 +266,7 @@ func TestListPagination(t *testing.T) {
 	ctx := context.Background()
 	svc := newService()
 	for i := 0; i < 13; i++ {
-		if _, err := svc.AddItem(ctx, public.AddItemInput{UserID: "u1", ProductID: "prod-1", Qty: 1}); err != nil {
+		if _, err := svc.AddItem(ctx, public.AddItemInput{UserID: "u1", ProductID: "prod-simple", Qty: 1}); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
 	}
@@ -283,7 +291,7 @@ func TestQtyLifecycle(t *testing.T) {
 	ctx := context.Background()
 	svc := newService()
 
-	cart, err := svc.AddItem(ctx, public.AddItemInput{UserID: "u1", ProductID: "prod-1", Qty: 2})
+	cart, err := svc.AddItem(ctx, public.AddItemInput{UserID: "u1", ProductID: "prod-simple", Qty: 2})
 	if err != nil {
 		t.Fatalf("add: %v", err)
 	}
