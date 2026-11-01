@@ -5,8 +5,10 @@ import type {
   OpStatus,
   Product,
   ProductDetail,
+  ProductImage,
   ProductListResponse,
   UpdateProductInput,
+  UploadImagesResult,
   Variant,
   CreateVariantInput,
   UpdateVariantInput,
@@ -58,6 +60,33 @@ export class ProductsApi {
   /** Multipart upload, field `file`, max 10 MiB. Async (202, Cloudinary). */
   adminUploadImage(id: string, form: FormData): Promise<OpStatus> {
     return this.request("POST", `/admin/products/${enc(id)}/image`, { body: form });
+  }
+
+  /**
+   * Lists the gallery, including rows whose upload is still queued
+   * (empty `url`). Admin only.
+   */
+  adminListImages(id: string): Promise<{ images: ProductImage[] }> {
+    return this.request("GET", `/admin/products/${enc(id)}/images`);
+  }
+
+  /**
+   * Multipart upload with repeated `files` entries (field name `files`),
+   * max 10 MiB each / 20 per request. One River job per file: the gallery
+   * fills in asynchronously (202).
+   */
+  adminUploadImages(id: string, form: FormData): Promise<UploadImagesResult> {
+    return this.request("POST", `/admin/products/${enc(id)}/images`, { body: form });
+  }
+
+  /** 204 No Content. Deleting the primary promotes the next ready image. */
+  adminDeleteImage(id: string, imageId: string): Promise<void> {
+    return this.request("DELETE", `/admin/products/${enc(id)}/images/${enc(imageId)}`);
+  }
+
+  /** Points the product's primary `image_url` at one gallery row. */
+  adminSetPrimaryImage(id: string, imageId: string): Promise<Product> {
+    return this.request("PUT", `/admin/products/${enc(id)}/images/${enc(imageId)}/primary`);
   }
 }
 

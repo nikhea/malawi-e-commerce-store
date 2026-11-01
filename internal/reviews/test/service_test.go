@@ -126,6 +126,17 @@ func (fakeProducts) Delete(context.Context, string) error { return nil }
 func (fakeProducts) SetImage(context.Context, string, string, string) (productspublic.Product, error) {
 	return productspublic.Product{}, nil
 }
+func (fakeProducts) AddImage(context.Context, string) (productspublic.Image, error) {
+	return productspublic.Image{}, nil
+}
+func (fakeProducts) ListImages(context.Context, string) ([]productspublic.Image, error) {
+	return nil, nil
+}
+func (fakeProducts) DeleteImage(context.Context, string, string) error { return nil }
+func (fakeProducts) SetPrimaryImage(context.Context, string, string) (productspublic.Product, error) {
+	return productspublic.Product{}, nil
+}
+func (fakeProducts) CompleteImage(context.Context, string, string, string) error { return nil }
 
 // fakeUsers knows "u1" (Aisha) and "u2" only.
 type fakeUsers struct{}

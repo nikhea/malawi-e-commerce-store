@@ -24,4 +24,8 @@ func RegisterRoutes(open, protected *gin.RouterGroup, svc public.Service, media 
 	admin.PATCH("/products/:id", h.Update)
 	admin.DELETE("/products/:id", h.Delete)
 	admin.POST("/products/:id/image", h.UploadImage)
+	admin.GET("/products/:id/images", h.ListImages)
+	admin.POST("/products/:id/images", h.UploadImages)
+	admin.DELETE("/products/:id/images/:imageId", h.DeleteImage)
+	admin.PUT("/products/:id/images/:imageId/primary", h.SetPrimaryImage)
 }

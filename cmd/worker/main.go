@@ -132,6 +132,10 @@ func run(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error {
 			_, err := productsSvc.SetImage(ctx, ownerID, url, publicID)
 			return err
 		})
+	mediaSvc.RegisterComplete(mediapublic.OwnerProductImage,
+		func(ctx context.Context, ownerID, url, publicID string) error {
+			return productsSvc.CompleteImage(ctx, ownerID, url, publicID)
+		})
 	river.AddWorker(workers, jobs.NewExpireReservationsWorker(inventorySvc, ordersSvc))
 	// send_mail delivery lives here. The API only enqueues (its notifier
 	// adapter); this registration is what actually sends.

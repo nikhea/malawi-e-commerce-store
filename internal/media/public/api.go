@@ -11,6 +11,10 @@ import "context"
 const (
 	OwnerCategory = "category"
 	OwnerProduct  = "product"
+	// OwnerProductImage targets one product_images row (owner id = image
+	// id) instead of the product row, so a gallery upload never overwrites
+	// products.image_url.
+	OwnerProductImage = "product_image"
 )
 
 // CompleteFunc stores the upload outcome on the owning record. Registered

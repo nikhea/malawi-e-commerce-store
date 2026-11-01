@@ -2,6 +2,7 @@ package test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -18,10 +19,16 @@ type fakeRepo struct {
 	byID       map[string]model.Product
 	bySlug     map[string]string
 	lastFilter model.ListFilter
+	images     map[string][]model.Image
+	nextImage  int
 }
 
 func newFakeRepo(seed ...model.Product) *fakeRepo {
-	f := &fakeRepo{byID: map[string]model.Product{}, bySlug: map[string]string{}}
+	f := &fakeRepo{
+		byID:   map[string]model.Product{},
+		bySlug: map[string]string{},
+		images: map[string][]model.Image{},
+	}
 	for _, p := range seed {
 		f.byID[p.ID] = p
 		f.bySlug[p.Slug] = p.ID
@@ -90,6 +97,99 @@ func (f *fakeRepo) SetImage(_ context.Context, id, url, _ string) (model.Product
 	p.ImageURL = url
 	f.byID[id] = p
 	return p, nil
+}
+
+// promoteFirst mirrors the repository's "lowest-position ready image"
+// rule for the in-memory store.
+func (f *fakeRepo) promoteFirst(productID string) {
+	p := f.byID[productID]
+	p.ImageURL, p.ImagePublicID = "", ""
+	for _, img := range f.images[productID] {
+		if img.URL != "" {
+			p.ImageURL, p.ImagePublicID = img.URL, img.PublicID
+			break
+		}
+	}
+	f.byID[productID] = p
+}
+
+func (f *fakeRepo) CreateImage(_ context.Context, productID string) (model.Image, error) {
+	if _, ok := f.byID[productID]; !ok {
+		return model.Image{}, apperr.NotFound("product not found")
+	}
+	f.nextImage++
+	img := model.Image{
+		ID:        fmt.Sprintf("img-%d", f.nextImage),
+		ProductID: productID,
+		Position:  len(f.images[productID]),
+		CreatedAt: time.Now(),
+	}
+	f.images[productID] = append(f.images[productID], img)
+	return img, nil
+}
+
+func (f *fakeRepo) ListImages(_ context.Context, productID string) ([]model.Image, error) {
+	return append([]model.Image{}, f.images[productID]...), nil
+}
+
+func (f *fakeRepo) GetImage(_ context.Context, productID, imageID string) (model.Image, error) {
+	for _, img := range f.images[productID] {
+		if img.ID == imageID {
+			return img, nil
+		}
+	}
+	return model.Image{}, apperr.NotFound("image not found")
+}
+
+func (f *fakeRepo) DeleteImage(_ context.Context, productID, imageID string) error {
+	list := f.images[productID]
+	for idx, img := range list {
+		if img.ID != imageID {
+			continue
+		}
+		f.images[productID] = append(append([]model.Image{}, list[:idx]...), list[idx+1:]...)
+		p := f.byID[productID]
+		if img.URL != "" && ((img.PublicID != "" && p.ImagePublicID == img.PublicID) || p.ImageURL == img.URL) {
+			f.promoteFirst(productID)
+		}
+		return nil
+	}
+	return apperr.NotFound("image not found")
+}
+
+func (f *fakeRepo) SetPrimaryImage(_ context.Context, productID, imageID string) (model.Product, error) {
+	for _, img := range f.images[productID] {
+		if img.ID != imageID {
+			continue
+		}
+		p := f.byID[productID]
+		p.ImageURL, p.ImagePublicID = img.URL, img.PublicID
+		f.byID[productID] = p
+		return p, nil
+	}
+	return model.Product{}, apperr.NotFound("image not found")
+}
+
+func (f *fakeRepo) CompleteImage(_ context.Context, imageID, url, publicID string) (model.Image, error) {
+	for productID, list := range f.images {
+		for idx, img := range list {
+			if img.ID != imageID {
+				continue
+			}
+			img.URL, img.PublicID = url, publicID
+			f.images[productID][idx] = img
+			return img, nil
+		}
+	}
+	return model.Image{}, nil // row deleted mid-upload
+}
+
+func (f *fakeRepo) PromoteIfEmpty(_ context.Context, productID string) (bool, error) {
+	if f.byID[productID].ImageURL != "" {
+		return false, nil
+	}
+	f.promoteFirst(productID)
+	return true, nil
 }
 
 // fakeCategories knows one category.
@@ -330,3 +430,125 @@ func TestListValidation(t *testing.T) {
 }
 
 func boolptr(v bool) *bool { return &v }
+
+func TestDetailIncludesGalleryImages(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo(model.Product{
+		ID: "prod-oil", Name: "Oil", Slug: "oil", PriceCents: 100,
+		ImageURL: "https://cdn/primary.jpg", ImagePublicID: "primary",
+	})
+	repo.images["prod-oil"] = []model.Image{
+		{ID: "img-1", ProductID: "prod-oil", URL: "https://cdn/primary.jpg", PublicID: "primary", Position: 0},
+		{ID: "img-2", ProductID: "prod-oil", URL: "https://cdn/second.jpg", PublicID: "second", Position: 1},
+		{ID: "img-3", ProductID: "prod-oil", Position: 2}, // still queued
+	}
+	svc := service.NewService(repo, fakeCategories{}, fakeVariants{})
+
+	d, err := svc.GetByID(ctx, "prod-oil")
+	if err != nil {
+		t.Fatalf("detail: %v", err)
+	}
+	if len(d.Images) != 2 {
+		t.Fatalf("expected 2 ready images, got %+v", d.Images)
+	}
+	if !d.Images[0].IsPrimary {
+		t.Fatalf("first image should be primary: %+v", d.Images[0])
+	}
+	if d.Images[1].IsPrimary {
+		t.Fatalf("second image should not be primary: %+v", d.Images[1])
+	}
+	if d.Images[0].URL != "https://cdn/primary.jpg" || d.Images[1].Position != 1 {
+		t.Fatalf("bad gallery: %+v", d.Images)
+	}
+}
+
+func TestGalleryLifecycle(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo(model.Product{ID: "prod-oil", Name: "Oil", Slug: "oil", PriceCents: 100})
+	svc := service.NewService(repo, fakeCategories{}, fakeVariants{})
+
+	first, err := svc.AddImage(ctx, "prod-oil")
+	if err != nil {
+		t.Fatalf("add first: %v", err)
+	}
+	second, err := svc.AddImage(ctx, "prod-oil")
+	if err != nil {
+		t.Fatalf("add second: %v", err)
+	}
+	if first.Position != 0 || second.Position != 1 {
+		t.Fatalf("positions not appended: %d %d", first.Position, second.Position)
+	}
+	if first.URL != "" {
+		t.Fatalf("new row should be pending: %+v", first)
+	}
+
+	// Pending rows cannot be promoted.
+	if _, err := svc.SetPrimaryImage(ctx, "prod-oil", first.ID); apperr.CodeOf(err) != apperr.CodeValidation {
+		t.Fatalf("expected VALIDATION_ERROR, got %v", err)
+	}
+
+	// First completed upload fills the row and becomes primary because the
+	// product had no image_url.
+	if err := svc.CompleteImage(ctx, first.ID, "https://cdn/one.jpg", "one"); err != nil {
+		t.Fatalf("complete first: %v", err)
+	}
+	if got := repo.byID["prod-oil"].ImageURL; got != "https://cdn/one.jpg" {
+		t.Fatalf("first image not promoted: %q", got)
+	}
+
+	if err := svc.CompleteImage(ctx, second.ID, "https://cdn/two.jpg", "two"); err != nil {
+		t.Fatalf("complete second: %v", err)
+	}
+	if got := repo.byID["prod-oil"].ImageURL; got != "https://cdn/one.jpg" {
+		t.Fatalf("second completion must not steal the primary: %q", got)
+	}
+
+	// Admin can move the primary.
+	p, err := svc.SetPrimaryImage(ctx, "prod-oil", second.ID)
+	if err != nil {
+		t.Fatalf("set primary: %v", err)
+	}
+	if p.ImageURL != "https://cdn/two.jpg" {
+		t.Fatalf("primary not changed: %+v", p)
+	}
+
+	// Deleting the primary promotes the remaining ready image.
+	if err := svc.DeleteImage(ctx, "prod-oil", second.ID); err != nil {
+		t.Fatalf("delete primary: %v", err)
+	}
+	if got := repo.byID["prod-oil"].ImageURL; got != "https://cdn/one.jpg" {
+		t.Fatalf("next image not promoted after delete: %q", got)
+	}
+
+	images, err := svc.ListImages(ctx, "prod-oil")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(images) != 1 || images[0].ID != first.ID || !images[0].IsPrimary {
+		t.Fatalf("bad admin gallery: %+v", images)
+	}
+}
+
+func TestGalleryValidationAndMissingRows(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo(model.Product{ID: "prod-oil", Name: "Oil", Slug: "oil", PriceCents: 100})
+	svc := service.NewService(repo, fakeCategories{}, fakeVariants{})
+
+	if _, err := svc.AddImage(ctx, "nope"); apperr.CodeOf(err) != apperr.CodeNotFound {
+		t.Fatalf("expected NOT_FOUND for unknown product, got %v", err)
+	}
+	if _, err := svc.ListImages(ctx, " "); apperr.CodeOf(err) != apperr.CodeValidation {
+		t.Fatalf("expected VALIDATION_ERROR for blank id, got %v", err)
+	}
+	if err := svc.DeleteImage(ctx, "prod-oil", "  "); apperr.CodeOf(err) != apperr.CodeValidation {
+		t.Fatalf("expected VALIDATION_ERROR for blank image id, got %v", err)
+	}
+	if _, err := svc.SetPrimaryImage(ctx, "prod-oil", "missing"); apperr.CodeOf(err) != apperr.CodeNotFound {
+		t.Fatalf("expected NOT_FOUND for unknown image, got %v", err)
+	}
+
+	// A job whose row was deleted while queued is a no-op, not an error.
+	if err := svc.CompleteImage(ctx, "missing", "https://cdn/x.jpg", "x"); err != nil {
+		t.Fatalf("missing row should complete silently: %v", err)
+	}
+}
