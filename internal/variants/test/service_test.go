@@ -10,6 +10,7 @@ import (
 	"github.com/nikhea/malawi-e-commerce-store/internal/variants/public"
 	"github.com/nikhea/malawi-e-commerce-store/internal/variants/service"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
+	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
 )
 
 // fakeRepo is an in-memory Repository. No real DB.
@@ -85,6 +86,12 @@ type fakeInventory struct{}
 
 func (fakeInventory) SetStock(context.Context, string, *string, int) (inventorypublic.Stock, error) {
 	return inventorypublic.Stock{}, nil
+}
+func (fakeInventory) BulkSetStock(context.Context, []inventorypublic.BulkStockItem, bool) ([]bulkdto.BulkResult[inventorypublic.Stock], error) {
+	return nil, nil
+}
+func (fakeInventory) GetStockByVariants(context.Context, []string) ([]inventorypublic.Stock, []string, error) {
+	return nil, nil, nil
 }
 func (fakeInventory) GetStock(_ context.Context, productID string, variantID *string) (inventorypublic.Stock, error) {
 	return inventorypublic.Stock{ProductID: productID, VariantID: variantID, OnHand: 16, Available: 16}, nil

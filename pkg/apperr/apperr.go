@@ -17,6 +17,12 @@ const (
 	CodeConflict     Code = "CONFLICT"
 	CodeRateLimited  Code = "RATE_LIMITED"
 	CodeInternal     Code = "INTERNAL"
+
+	// Bulk-endpoint codes. Bulk requests keep per-item failures inside a
+	// 200 envelope; these codes are for whole-request rejections.
+	CodeBulkLimitExceeded   Code = "BULK_LIMIT_EXCEEDED"
+	CodeDuplicateItem       Code = "DUPLICATE_ITEM"
+	CodeIdempotencyConflict Code = "IDEMPOTENCY_CONFLICT"
 )
 
 // Error is the service-layer error type. Message is safe to expose to
@@ -42,6 +48,20 @@ func Unauthorized(msg string) *Error { return &Error{Code: CodeUnauthorized, Mes
 func Forbidden(msg string) *Error    { return &Error{Code: CodeForbidden, Message: msg} }
 func Conflict(msg string) *Error     { return &Error{Code: CodeConflict, Message: msg} }
 func RateLimited(msg string) *Error  { return &Error{Code: CodeRateLimited, Message: msg} }
+
+// BulkLimitExceeded rejects a batch larger than the configured cap.
+func BulkLimitExceeded(msg string) *Error {
+	return &Error{Code: CodeBulkLimitExceeded, Message: msg}
+}
+
+// Duplicate flags repeated ids/keys inside one bulk request.
+func Duplicate(msg string) *Error { return &Error{Code: CodeDuplicateItem, Message: msg} }
+
+// IdempotencyConflict flags the same Idempotency-Key reused with a
+// different request body.
+func IdempotencyConflict(msg string) *Error {
+	return &Error{Code: CodeIdempotencyConflict, Message: msg}
+}
 
 // Internal wraps an unexpected failure. err is kept for logs; only a
 // generic message reaches the client.
@@ -74,6 +94,10 @@ func StatusOf(err error) int {
 		return http.StatusConflict
 	case CodeRateLimited:
 		return http.StatusTooManyRequests
+	case CodeBulkLimitExceeded, CodeDuplicateItem:
+		return http.StatusBadRequest
+	case CodeIdempotencyConflict:
+		return http.StatusConflict
 	default:
 		return http.StatusInternalServerError
 	}

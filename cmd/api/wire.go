@@ -46,6 +46,8 @@ import (
 	variantspublic "github.com/nikhea/malawi-e-commerce-store/internal/variants/public"
 	wishlist "github.com/nikhea/malawi-e-commerce-store/internal/wishlist"
 	wishlistpublic "github.com/nikhea/malawi-e-commerce-store/internal/wishlist/public"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/bulk"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/idempotency"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/mail"
 	pkgmedia "github.com/nikhea/malawi-e-commerce-store/pkg/media"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/middleware"
@@ -73,7 +75,8 @@ type app struct {
 	authSvc       authpublic.Service
 	mediaSvc      *mediaservice.Service
 	riverClient   *river.Client[pgx.Tx]
-	redisClient   *redis.Client // nil when Redis is down: limiters detach
+	redisClient   *redis.Client      // nil when Redis is down: limiters detach
+	idemStore     *idempotency.Store // nil when Redis is down: bulk writes just run
 }
 
 // wireApp assembles modules and infra in dependency order:
@@ -82,6 +85,10 @@ type app struct {
 // Modules build via their index.go Wire entry points; only app-level
 // infra (uploader, River, admin set) is constructed here.
 func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, error) {
+	// Bulk caps are one process-wide policy: endpoints that need a lower
+	// cap pass it explicitly to pkg/bulk.CheckCount.
+	bulk.SetMaxItems(cfg.MaxBulkItems)
+
 	usersSvc := users.Wire(pool)
 	categoriesSvc := categories.Wire(pool)
 	inventorySvc := inventory.Wire(pool)
@@ -96,6 +103,9 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 		log.Printf("WARNING: redis unavailable, rate limiting disabled: %v", err)
 		redisClient = nil
 	}
+	// Idempotency shares the same Redis. A nil store is safe: bulk writes
+	// simply run without replay protection, exactly like rate limiting.
+	idemStore := idempotency.New(redisClient)
 
 	// Notification fan-out (durable River jobs, not the old in-process
 	// bus): domain code calls narrow notifier methods; the adapter below
@@ -198,6 +208,7 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 		mediaSvc:      mediaSvc,
 		riverClient:   riverClient,
 		redisClient:   redisClient,
+		idemStore:     idemStore,
 	}, nil
 }
 
@@ -264,7 +275,7 @@ func registerRoutes(r *gin.Engine, a *app) {
 	variants.RegisterRoutes(open, protected, a.variantsSvc)
 	products.RegisterRoutes(open, protected, a.productsSvc, a.mediaSvc)
 	cart.RegisterRoutes(protected, a.cartSvc)
-	inventory.RegisterRoutes(protected, a.inventorySvc)
+	inventory.RegisterRoutes(protected, a.inventorySvc, a.idemStore)
 	orders.RegisterRoutes(protected, a.ordersSvc)
 	// Burst shield for Stripe retries: 120 webhook hits/min/IP. The HMAC
 	// stays the real authentication; this only absorbs floods.

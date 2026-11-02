@@ -62,6 +62,10 @@ type Config struct {
 	FXMWKPerUSD float64
 
 	QRSigningSecret string
+
+	// MaxBulkItems caps every bulk request (MAX_BULK_ITEMS, default 50).
+	// Individual endpoints may enforce a lower cap.
+	MaxBulkItems int
 }
 
 // Load reads the environment into Config. DATABASE_URL and JWT_SECRET are
@@ -104,6 +108,12 @@ func Load() (Config, error) {
 	}
 	if cfg.JWTTTLHours, err = envIntOr("JWT_TTL_HOURS", 24); err != nil {
 		return Config{}, fmt.Errorf("invalid JWT_TTL_HOURS: %w", err)
+	}
+	if cfg.MaxBulkItems, err = envIntOr("MAX_BULK_ITEMS", 50); err != nil {
+		return Config{}, fmt.Errorf("invalid MAX_BULK_ITEMS: %w", err)
+	}
+	if cfg.MaxBulkItems <= 0 {
+		return Config{}, errors.New("MAX_BULK_ITEMS must be positive")
 	}
 	if cfg.FXMWKPerUSD, err = envFloatOr("FX_MWK_PER_USD", 1700); err != nil || cfg.FXMWKPerUSD <= 0 {
 		return Config{}, fmt.Errorf("invalid FX_MWK_PER_USD: %w", err)

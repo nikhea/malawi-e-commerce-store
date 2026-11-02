@@ -12,6 +12,7 @@ import (
 	"github.com/nikhea/malawi-e-commerce-store/internal/orders/public"
 	"github.com/nikhea/malawi-e-commerce-store/internal/orders/service"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
+	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
 )
 
 // fakeRepo is an in-memory orders store with guarded transitions.
@@ -136,6 +137,12 @@ type fakeInventory struct {
 
 func (f *fakeInventory) SetStock(context.Context, string, *string, int) (inventorypublic.Stock, error) {
 	return inventorypublic.Stock{}, nil
+}
+func (f *fakeInventory) BulkSetStock(context.Context, []inventorypublic.BulkStockItem, bool) ([]bulkdto.BulkResult[inventorypublic.Stock], error) {
+	return nil, nil
+}
+func (f *fakeInventory) GetStockByVariants(context.Context, []string) ([]inventorypublic.Stock, []string, error) {
+	return nil, nil, nil
 }
 func (f *fakeInventory) GetStock(context.Context, string, *string) (inventorypublic.Stock, error) {
 	return inventorypublic.Stock{}, nil
