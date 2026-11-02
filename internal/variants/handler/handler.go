@@ -1,10 +1,13 @@
 package handler
 
 import (
+	"time"
+
 	"github.com/gin-gonic/gin"
 	"github.com/nikhea/malawi-e-commerce-store/internal/variants/dto"
 	"github.com/nikhea/malawi-e-commerce-store/internal/variants/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/bulk"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/response"
 )
 
@@ -113,4 +116,93 @@ func (h *Handler) Delete(c *gin.Context) {
 		return
 	}
 	response.NoContent(c)
+}
+
+// BulkCreate godoc
+// @Summary Create variants in bulk (admin)
+// @Description Per-item results in a 200 envelope. The product must exist
+// @Description (whole-request 404). SKUs are uppercased like single create;
+// @Description duplicate SKUs in the batch reject the request, while a DB SKU
+// @Description collision is a per-item CONFLICT. dryRun projects without
+// @Description writing; atomic inserts every SKU in one transaction.
+// @Tags admin
+// @Accept json
+// @Produce json
+// @Param id path string true "Product ID"
+// @Param Idempotency-Key header string false "Replay-safe request key (24h)"
+// @Param body body dto.BulkCreateVariantsRequest true "SKUs"
+// @Success 200 {object} dto.BulkCreateVariantsResponse
+// @Failure 400 {object} response.ErrorResponse
+// @Failure 401 {object} response.ErrorResponse
+// @Failure 403 {object} response.ErrorResponse
+// @Failure 404 {object} response.ErrorResponse
+// @Failure 409 {object} response.ErrorResponse
+// @Security BearerAuth
+// @Router /products/{id}/variants/bulk [post]
+func (h *Handler) BulkCreate(c *gin.Context) {
+	var req dto.BulkCreateVariantsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, apperr.Validation("items is required"))
+		return
+	}
+	productID := c.Param("id")
+	items := make([]public.CreateVariantInput, 0, len(req.Items))
+	for _, in := range req.Items {
+		items = append(items, public.CreateVariantInput{
+			ProductID: productID, Name: in.Name, SKU: in.SKU, PriceCents: in.PriceCents,
+		})
+	}
+	started := time.Now()
+	results, err := h.svc.BulkCreate(c.Request.Context(), productID, items, req.Atomic, req.DryRun)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+	summary := bulk.Summary(results)
+	bulk.Log(c, "variants.bulk_create", started, summary)
+	response.OK(c, dto.BulkCreateVariantsResponse{Results: results, Summary: summary})
+}
+
+// BulkUpdate godoc
+// @Summary Update variants in bulk (admin)
+// @Description One partial patch per variant; product_id and sku stay
+// @Description immutable. An empty patch is a per-item validation error.
+// @Description Duplicate ids reject the whole request. Availability is read
+// @Description before writes; dryRun projects without writing.
+// @Tags admin
+// @Accept json
+// @Produce json
+// @Param Idempotency-Key header string false "Replay-safe request key (24h)"
+// @Param body body dto.BulkUpdateVariantsRequest true "Patches"
+// @Success 200 {object} dto.BulkUpdateVariantsResponse
+// @Failure 400 {object} response.ErrorResponse
+// @Failure 401 {object} response.ErrorResponse
+// @Failure 403 {object} response.ErrorResponse
+// @Failure 409 {object} response.ErrorResponse
+// @Security BearerAuth
+// @Router /admin/variants/bulk [patch]
+func (h *Handler) BulkUpdate(c *gin.Context) {
+	var req dto.BulkUpdateVariantsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, apperr.Validation("updates is required"))
+		return
+	}
+	items := make([]public.BulkUpdateItem, 0, len(req.Updates))
+	for _, u := range req.Updates {
+		items = append(items, public.BulkUpdateItem{
+			ID: u.ID,
+			Patch: public.UpdateVariantInput{
+				Name: u.Patch.Name, PriceCents: u.Patch.PriceCents, IsActive: u.Patch.IsActive,
+			},
+		})
+	}
+	started := time.Now()
+	results, err := h.svc.BulkUpdate(c.Request.Context(), items, req.Atomic, req.DryRun)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+	summary := bulk.Summary(results)
+	bulk.Log(c, "variants.bulk_update", started, summary)
+	response.OK(c, dto.BulkUpdateVariantsResponse{Results: results, Summary: summary})
 }

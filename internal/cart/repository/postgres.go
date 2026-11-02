@@ -175,7 +175,11 @@ func escapeLike(s string) string {
 // Snapshot columns (name/sku/price) refresh to the catalog's current
 // values on every add — the cart tracks the live price, checkout freezes.
 func (r *Postgres) UpsertItem(ctx context.Context, i model.Item) (model.Item, error) {
-	const q = `INSERT INTO cart_items (cart_id, product_id, variant_id, name, sku, unit_price_cents, currency, qty)
+	return scanItem(r.pool.QueryRow(ctx, upsertItemSQL, i.CartID, i.ProductID, i.VariantID,
+		i.Name, i.SKU, i.UnitPriceCents, i.Currency, i.Qty))
+}
+
+const upsertItemSQL = `INSERT INTO cart_items (cart_id, product_id, variant_id, name, sku, unit_price_cents, currency, qty)
 	           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	           ON CONFLICT (cart_id, product_id, COALESCE(variant_id, '00000000-0000-0000-0000-000000000000'))
 	           DO UPDATE SET qty = cart_items.qty + EXCLUDED.qty,
@@ -183,8 +187,35 @@ func (r *Postgres) UpsertItem(ctx context.Context, i model.Item) (model.Item, er
 	                         unit_price_cents = EXCLUDED.unit_price_cents,
 	                         updated_at = now()
 	           RETURNING ` + itemColumns
-	return scanItem(r.pool.QueryRow(ctx, q, i.CartID, i.ProductID, i.VariantID,
-		i.Name, i.SKU, i.UnitPriceCents, i.Currency, i.Qty))
+
+// UpsertMany writes the batch in one transaction and touches the cart once.
+// failIndex is -1 on success; when >= 0 the batch rolled back and err is
+// that item's failure.
+func (r *Postgres) UpsertMany(ctx context.Context, items []model.Item) ([]model.Item, int, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, -1, apperr.Internal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	out := make([]model.Item, len(items))
+	cartID := ""
+	for i, item := range items {
+		cartID = item.CartID
+		row, err := scanItem(tx.QueryRow(ctx, upsertItemSQL, item.CartID, item.ProductID, item.VariantID,
+			item.Name, item.SKU, item.UnitPriceCents, item.Currency, item.Qty))
+		if err != nil {
+			return nil, i, err
+		}
+		out[i] = row
+	}
+	if _, err := tx.Exec(ctx, `UPDATE carts SET updated_at = now() WHERE id = $1`, cartID); err != nil {
+		return nil, -1, apperr.Internal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, -1, apperr.Internal(err)
+	}
+	return out, -1, nil
 }
 
 func (r *Postgres) GetItem(ctx context.Context, cartID, itemID string) (model.Item, error) {

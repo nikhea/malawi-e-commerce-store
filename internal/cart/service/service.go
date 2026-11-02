@@ -9,6 +9,8 @@ import (
 	productspublic "github.com/nikhea/malawi-e-commerce-store/internal/products/public"
 	userspublic "github.com/nikhea/malawi-e-commerce-store/internal/users/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/bulk"
+	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/pagination"
 )
 
@@ -21,6 +23,7 @@ type Repository interface {
 	ListItemsPage(ctx context.Context, cartID string, f model.ListFilter) ([]model.Item, int64, error)
 	Totals(ctx context.Context, cartID string) (int64, string, error)
 	UpsertItem(ctx context.Context, i model.Item) (model.Item, error)
+	UpsertMany(ctx context.Context, items []model.Item) ([]model.Item, int, error)
 	GetItem(ctx context.Context, cartID, itemID string) (model.Item, error)
 	SetQty(ctx context.Context, cartID, itemID string, qty int) (model.Item, error)
 	DeleteItem(ctx context.Context, cartID, itemID string) error
@@ -48,15 +51,19 @@ func toPublic(c model.Cart, items []model.Item) public.Cart {
 	return toPublicCart(c, items, subtotal, currency)
 }
 
+func toPublicLine(i model.Item) public.Line {
+	return public.Line{
+		ID: i.ID, ProductID: i.ProductID, VariantID: i.VariantID,
+		Name: i.Name, SKU: i.SKU, UnitPriceCents: i.UnitPriceCents,
+		Currency: i.Currency, Qty: i.Qty,
+		LineTotalCents: i.UnitPriceCents * int64(i.Qty),
+	}
+}
+
 func toPublicCart(c model.Cart, items []model.Item, subtotal int64, currency string) public.Cart {
 	lines := make([]public.Line, 0, len(items))
 	for _, i := range items {
-		lines = append(lines, public.Line{
-			ID: i.ID, ProductID: i.ProductID, VariantID: i.VariantID,
-			Name: i.Name, SKU: i.SKU, UnitPriceCents: i.UnitPriceCents,
-			Currency: i.Currency, Qty: i.Qty,
-			LineTotalCents: i.UnitPriceCents * int64(i.Qty),
-		})
+		lines = append(lines, toPublicLine(i))
 	}
 	if currency == "" {
 		currency = "USD"
@@ -158,50 +165,62 @@ func trimPtr(v *string) *string {
 	return &trimmed
 }
 
-func (s *service) AddItem(ctx context.Context, in public.AddItemInput) (public.Cart, error) {
-	if in.Qty <= 0 {
-		return public.Cart{}, apperr.Validation("qty must be positive")
+// prepareAdd validates one line against the catalog and snapshots its
+// price. It does no writes: single add, bulk add and their per-item error
+// reporting share this exact semantics. CartID is filled by the caller.
+func (s *service) prepareAdd(ctx context.Context, productID string, variantID *string, qty int) (model.Item, error) {
+	if qty <= 0 {
+		return model.Item{}, apperr.Validation("qty must be positive")
 	}
-	if strings.TrimSpace(in.ProductID) == "" {
-		return public.Cart{}, apperr.Validation("product id is required")
+	productID = strings.TrimSpace(productID)
+	if productID == "" {
+		return model.Item{}, apperr.Validation("product id is required")
 	}
 
 	// Catalog validation + price snapshot in one detail call.
-	detail, err := s.products.GetByID(ctx, in.ProductID)
+	detail, err := s.products.GetByID(ctx, productID)
 	if err != nil {
-		return public.Cart{}, err // product NOT_FOUND passes through
+		return model.Item{}, err // product NOT_FOUND passes through
 	}
 	if !detail.Product.IsActive {
-		return public.Cart{}, apperr.Conflict("product is not available")
+		return model.Item{}, apperr.Conflict("product is not available")
 	}
 	// Stock is tracked per variant, not on the base product, so a
 	// variant-less line has nothing to reserve at checkout. Require the
 	// SKU whenever the product has one; base-price lines stay valid for
 	// products that genuinely have no variants.
-	if in.VariantID == nil && len(detail.Variants) > 0 {
-		return public.Cart{}, apperr.Validation("variant id is required for this product")
+	if variantID == nil && len(detail.Variants) > 0 {
+		return model.Item{}, apperr.Validation("variant id is required for this product")
 	}
 	name, sku, price := detail.Product.Name, "", detail.Product.PriceCents
-	if in.VariantID != nil {
-		v, ok := findVariant(detail.Variants, *in.VariantID)
+	if variantID != nil {
+		v, ok := findVariant(detail.Variants, *variantID)
 		if !ok {
-			return public.Cart{}, apperr.NotFound("variant not found")
+			return model.Item{}, apperr.NotFound("variant not found")
 		}
 		if !v.IsActive {
-			return public.Cart{}, apperr.Conflict("variant is not available")
+			return model.Item{}, apperr.Conflict("variant is not available")
 		}
 		name, sku, price = detail.Product.Name+" / "+v.Name, v.SKU, v.PriceCents
 	}
+	return model.Item{
+		ProductID: productID, VariantID: variantID,
+		Name: name, SKU: sku, UnitPriceCents: price,
+		Currency: detail.Product.Currency, Qty: qty,
+	}, nil
+}
 
+func (s *service) AddItem(ctx context.Context, in public.AddItemInput) (public.Cart, error) {
+	item, err := s.prepareAdd(ctx, in.ProductID, in.VariantID, in.Qty)
+	if err != nil {
+		return public.Cart{}, err
+	}
 	cart, _, err := s.load(ctx, in.UserID)
 	if err != nil {
 		return public.Cart{}, err
 	}
-	if _, err := s.repo.UpsertItem(ctx, model.Item{
-		CartID: cart.ID, ProductID: in.ProductID, VariantID: in.VariantID,
-		Name: name, SKU: sku, UnitPriceCents: price,
-		Currency: detail.Product.Currency, Qty: in.Qty,
-	}); err != nil {
+	item.CartID = cart.ID
+	if _, err := s.repo.UpsertItem(ctx, item); err != nil {
 		return public.Cart{}, err
 	}
 	if err := s.repo.Touch(ctx, cart.ID); err != nil {
@@ -209,6 +228,95 @@ func (s *service) AddItem(ctx context.Context, in public.AddItemInput) (public.C
 	}
 	_, view, err := s.load(ctx, in.UserID)
 	return view, err
+}
+
+// BulkAdd adds up to 25 lines for the JWT caller. Identity never comes from
+// the body. Non-atomic batches keep going after a bad line; atomic batches
+// validate everything first and write through one transaction.
+func (s *service) BulkAdd(ctx context.Context, userID string, items []public.BulkAddItem, atomic bool) ([]bulkdto.BulkResult[public.Line], public.Cart, error) {
+	limit := 25
+	if max := bulk.MaxItems(); max < limit {
+		limit = max
+	}
+	if err := bulk.CheckCount(len(items), limit); err != nil {
+		return nil, public.Cart{}, err
+	}
+
+	keys := make([]string, 0, len(items))
+	for _, in := range items {
+		productID := strings.TrimSpace(in.ProductID)
+		if productID == "" {
+			continue
+		}
+		keys = append(keys, bulk.LineKey(productID, in.VariantID))
+	}
+	if dup, ok := bulk.FindDuplicate(keys); ok {
+		return nil, public.Cart{}, apperr.Duplicate("duplicate cart line: " + dup)
+	}
+
+	cart, before, err := s.load(ctx, userID)
+	if err != nil {
+		return nil, public.Cart{}, err
+	}
+
+	prepared := make([]model.Item, len(items))
+	itemErrs := make([]error, len(items))
+	results := make([]bulkdto.BulkResult[public.Line], len(items))
+	for i, in := range items {
+		key := bulk.LineKey(strings.TrimSpace(in.ProductID), in.VariantID)
+		results[i] = bulkdto.BulkResult[public.Line]{Index: i, ID: key, Status: "ok"}
+		item, err := s.prepareAdd(ctx, in.ProductID, in.VariantID, in.Qty)
+		if err != nil {
+			itemErrs[i] = err
+			results[i] = bulk.Failed[public.Line](i, key, err)
+			continue
+		}
+		item.CartID = cart.ID
+		prepared[i] = item
+	}
+
+	if atomic {
+		for i, err := range itemErrs {
+			if err != nil {
+				return bulk.Rollback(results, i, err), before, nil
+			}
+		}
+		rows, failIndex, err := s.repo.UpsertMany(ctx, prepared)
+		if err != nil {
+			if failIndex < 0 {
+				failIndex = 0
+			}
+			return bulk.Rollback(results, failIndex, err), before, nil
+		}
+		for i := range items {
+			results[i] = bulk.OK(i, rows[i].ID, toPublicLine(rows[i]))
+		}
+	} else {
+		wrote := false
+		for i := range items {
+			if itemErrs[i] != nil {
+				continue
+			}
+			row, err := s.repo.UpsertItem(ctx, prepared[i])
+			if err != nil {
+				results[i] = bulk.Failed[public.Line](i, results[i].ID, err)
+				continue
+			}
+			wrote = true
+			results[i] = bulk.OK(i, row.ID, toPublicLine(row))
+		}
+		if wrote {
+			if err := s.repo.Touch(ctx, cart.ID); err != nil {
+				return nil, public.Cart{}, apperr.Internal(err)
+			}
+		}
+	}
+
+	_, view, err := s.load(ctx, userID)
+	if err != nil {
+		return nil, public.Cart{}, err
+	}
+	return results, view, nil
 }
 
 func findVariant(variants []productspublic.VariantView, id string) (productspublic.VariantView, bool) {

@@ -13,6 +13,7 @@ import (
 	"github.com/nikhea/malawi-e-commerce-store/internal/products/service"
 	variantspublic "github.com/nikhea/malawi-e-commerce-store/internal/variants/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
+	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
 )
 
 var errBulk = errors.New("bulk write failed")
@@ -341,6 +342,14 @@ func (fakeVariants) Update(context.Context, string, variantspublic.UpdateVariant
 	return variantspublic.Variant{}, nil
 }
 func (fakeVariants) Delete(context.Context, string) error { return nil }
+
+func (fakeVariants) BulkCreate(context.Context, string, []variantspublic.CreateVariantInput, bool, bool) ([]bulkdto.BulkResult[variantspublic.Variant], error) {
+	return nil, nil
+}
+
+func (fakeVariants) BulkUpdate(context.Context, []variantspublic.BulkUpdateItem, bool, bool) ([]bulkdto.BulkResult[variantspublic.Variant], error) {
+	return nil, nil
+}
 
 func newService() public.Service {
 	return service.NewService(newFakeRepo(), fakeCategories{}, fakeVariants{})

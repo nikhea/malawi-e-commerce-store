@@ -1,10 +1,13 @@
 package handler
 
 import (
+	"time"
+
 	"github.com/gin-gonic/gin"
 	"github.com/nikhea/malawi-e-commerce-store/internal/cart/dto"
 	"github.com/nikhea/malawi-e-commerce-store/internal/cart/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/bulk"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/middleware"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/response"
 )
@@ -83,6 +86,56 @@ func (h *Handler) AddItem(c *gin.Context) {
 		return
 	}
 	response.OK(c, cart)
+}
+
+// BulkAdd godoc
+// @Summary Add items in bulk
+// @Description Max 25 lines. Identity comes from the JWT. Duplicate
+// @Description product/variant lines reject the whole request. Non-atomic
+// @Description batches report invalid lines per item and keep going; atomic
+// @Description batches validate first and write all lines in one transaction.
+// @Description The response carries the full updated cart.
+// @Tags cart
+// @Accept json
+// @Produce json
+// @Param Idempotency-Key header string false "Replay-safe request key (24h)"
+// @Param body body dto.BulkAddItemsRequest true "Lines"
+// @Success 200 {object} dto.BulkAddCartResponse
+// @Failure 400 {object} response.ErrorResponse
+// @Failure 401 {object} response.ErrorResponse
+// @Failure 404 {object} response.ErrorResponse
+// @Failure 409 {object} response.ErrorResponse
+// @Security BearerAuth
+// @Router /cart/items/bulk [post]
+func (h *Handler) BulkAdd(c *gin.Context) {
+	var req dto.BulkAddItemsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, apperr.Validation("items is required"))
+		return
+	}
+	items := make([]public.BulkAddItem, 0, len(req.Items))
+	for _, in := range req.Items {
+		items = append(items, public.BulkAddItem{
+			ProductID: in.ProductID, VariantID: in.VariantID, Qty: in.Qty,
+		})
+	}
+	started := time.Now()
+	results, cart, err := h.svc.BulkAdd(c.Request.Context(), middleware.UserIDOf(c), items, req.Atomic)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+	summary := bulk.Summary(results)
+	bulk.Log(c, "cart.bulk_add", started, summary)
+	out := make([]dto.BulkAddResult, len(results))
+	for i, r := range results {
+		out[i] = dto.BulkAddResult(r)
+	}
+	response.OK(c, dto.BulkAddCartResponse{
+		Results: out,
+		Summary: dto.BulkAddSummary{Total: summary.Total, Succeeded: summary.Succeeded, Failed: summary.Failed},
+		Cart:    cart,
+	})
 }
 
 // SetQty godoc

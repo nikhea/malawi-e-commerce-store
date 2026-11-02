@@ -365,6 +365,32 @@ export type UpdateVariantInput = {
   is_active?: boolean;
 };
 
+/**
+ * POST /products/{id}/variants/bulk. Cap MAX_BULK_ITEMS (default 50).
+ * The product must exist (whole-request 404); duplicate SKUs reject the
+ * whole batch.
+ */
+export type BulkCreateVariantsInput = {
+  atomic?: boolean;
+  dryRun?: boolean;
+  items: CreateVariantInput[];
+};
+
+export type BulkUpdateVariantItem = {
+  id: string;
+  patch: UpdateVariantInput;
+};
+
+/** PATCH /admin/variants/bulk. Duplicate ids reject the whole request. */
+export type BulkUpdateVariantsInput = {
+  atomic?: boolean;
+  dryRun?: boolean;
+  updates: BulkUpdateVariantItem[];
+};
+
+export type BulkCreateVariantsResponse = BulkResponse<Variant>;
+export type BulkUpdateVariantsResponse = BulkResponse<Variant>;
+
 // ---------------------------------------------------------------------------
 // inventory — /api/v1/admin/inventory (admin only)
 // ---------------------------------------------------------------------------
@@ -471,6 +497,21 @@ export type AddCartItemInput = {
 };
 
 export type SetQtyInput = { qty: number };
+
+/**
+ * POST /cart/items/bulk. Capped at 25 lines; duplicate product/variant
+ * lines reject the whole request.
+ */
+export type BulkAddCartItemsInput = {
+  atomic?: boolean;
+  items: AddCartItemInput[];
+};
+
+/**
+ * Bulk envelope for a batch add plus the full cart after the batch, so the
+ * client never has to re-fetch.
+ */
+export type BulkAddCartResponse = BulkResponse<CartLine> & { cart: Cart };
 
 export type CartSort =
   | "oldest"

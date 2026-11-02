@@ -79,6 +79,18 @@ func (f *fakeRepo) UpsertItem(_ context.Context, i model.Item) (model.Item, erro
 	return i, nil
 }
 
+func (f *fakeRepo) UpsertMany(ctx context.Context, items []model.Item) ([]model.Item, int, error) {
+	out := make([]model.Item, len(items))
+	for i, item := range items {
+		row, err := f.UpsertItem(ctx, item)
+		if err != nil {
+			return nil, i, err
+		}
+		out[i] = row
+	}
+	return out, -1, nil
+}
+
 func ptrStr(s *string) string {
 	if s == nil {
 		return ""
@@ -332,4 +344,139 @@ func (fakeProducts) BulkUpdate(context.Context, []productspublic.BulkUpdateItem,
 }
 func (fakeProducts) BulkDelete(context.Context, []string, bool, bool) ([]bulkdto.BulkResult[bulkdto.Empty], error) {
 	return nil, nil
+}
+
+func TestBulkAdd(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("happy path writes every line", func(t *testing.T) {
+		svc := newService()
+		variantID := "var-1"
+		results, cart, err := svc.BulkAdd(ctx, "u1", []public.BulkAddItem{
+			{ProductID: "prod-simple", Qty: 2},
+			{ProductID: "prod-1", VariantID: &variantID, Qty: 1},
+		}, false)
+		if err != nil {
+			t.Fatalf("bulk add: %v", err)
+		}
+		if len(results) != 2 || results[0].Status != "ok" || results[1].Status != "ok" {
+			t.Fatalf("bad results: %+v", results)
+		}
+		if len(cart.Items) != 2 || cart.SubtotalCents != 2000+2500 {
+			t.Fatalf("bad cart: %+v", cart)
+		}
+		if results[1].Data == nil || results[1].Data.SKU != "OIL-500" {
+			t.Fatalf("line data missing: %+v", results[1])
+		}
+	})
+
+	t.Run("invalid line does not stop the batch", func(t *testing.T) {
+		svc := newService()
+		results, cart, err := svc.BulkAdd(ctx, "u1", []public.BulkAddItem{
+			{ProductID: "prod-simple", Qty: 1},
+			{ProductID: "ghost", Qty: 1},
+		}, false)
+		if err != nil {
+			t.Fatalf("bulk add: %v", err)
+		}
+		if results[0].Status != "ok" {
+			t.Fatalf("first line should succeed: %+v", results[0])
+		}
+		if results[1].Status != "error" || results[1].Error.Code != apperr.CodeNotFound {
+			t.Fatalf("second line should be NOT_FOUND: %+v", results[1])
+		}
+		if len(cart.Items) != 1 {
+			t.Fatalf("valid line missing from cart: %+v", cart)
+		}
+	})
+
+	t.Run("duplicate lines reject the batch", func(t *testing.T) {
+		svc := newService()
+		_, _, err := svc.BulkAdd(ctx, "u1", []public.BulkAddItem{
+			{ProductID: "prod-simple", Qty: 1},
+			{ProductID: "prod-simple", Qty: 2},
+		}, false)
+		if apperr.CodeOf(err) != apperr.CodeDuplicateItem {
+			t.Fatalf("expected DUPLICATE_ITEM, got %v", err)
+		}
+	})
+
+	t.Run("cap is 25", func(t *testing.T) {
+		svc := newService()
+		items := make([]public.BulkAddItem, 26)
+		for i := range items {
+			items[i] = public.BulkAddItem{ProductID: "prod-simple", Qty: 1}
+		}
+		if _, _, err := svc.BulkAdd(ctx, "u1", items, false); apperr.CodeOf(err) != apperr.CodeBulkLimitExceeded {
+			t.Fatalf("expected BULK_LIMIT_EXCEEDED, got %v", err)
+		}
+	})
+
+	t.Run("merges with an existing line", func(t *testing.T) {
+		svc := newService()
+		if _, err := svc.AddItem(ctx, public.AddItemInput{UserID: "u1", ProductID: "prod-simple", Qty: 1}); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		results, cart, err := svc.BulkAdd(ctx, "u1", []public.BulkAddItem{
+			{ProductID: "prod-simple", Qty: 2},
+		}, false)
+		if err != nil {
+			t.Fatalf("bulk add: %v", err)
+		}
+		if results[0].Data == nil || results[0].Data.Qty != 3 {
+			t.Fatalf("expected merged qty 3, got %+v", results[0].Data)
+		}
+		if len(cart.Items) != 1 || cart.Items[0].Qty != 3 || cart.SubtotalCents != 3000 {
+			t.Fatalf("bad merged cart: %+v", cart)
+		}
+	})
+
+	t.Run("atomic rollback leaves the cart unchanged", func(t *testing.T) {
+		svc := newService()
+		results, cart, err := svc.BulkAdd(ctx, "u1", []public.BulkAddItem{
+			{ProductID: "prod-simple", Qty: 1},
+			{ProductID: "ghost", Qty: 1},
+		}, true)
+		if err != nil {
+			t.Fatalf("bulk add: %v", err)
+		}
+		for _, r := range results {
+			if r.Status != "rolled_back" {
+				t.Fatalf("expected rolled_back, got %+v", r)
+			}
+		}
+		if results[1].Error == nil || results[1].Error.Code != apperr.CodeNotFound {
+			t.Fatalf("failing line should carry the error: %+v", results[1])
+		}
+		if len(cart.Items) != 0 {
+			t.Fatalf("rollback cart should be unchanged: %+v", cart)
+		}
+		after, err := svc.Get(ctx, "u1")
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		if len(after.Items) != 0 {
+			t.Fatalf("atomic rollback wrote lines: %+v", after)
+		}
+	})
+
+	t.Run("atomic success writes all lines", func(t *testing.T) {
+		svc := newService()
+		variantID := "var-1"
+		results, cart, err := svc.BulkAdd(ctx, "u1", []public.BulkAddItem{
+			{ProductID: "prod-simple", Qty: 1},
+			{ProductID: "prod-1", VariantID: &variantID, Qty: 2},
+		}, true)
+		if err != nil {
+			t.Fatalf("bulk add: %v", err)
+		}
+		for _, r := range results {
+			if r.Status != "ok" {
+				t.Fatalf("expected ok, got %+v", r)
+			}
+		}
+		if len(cart.Items) != 2 || cart.SubtotalCents != 1000+5000 {
+			t.Fatalf("bad cart: %+v", cart)
+		}
+	})
 }

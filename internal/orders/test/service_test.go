@@ -113,6 +113,9 @@ func (f *fakeCart) Get(_ context.Context, userID string) (cartpublic.Cart, error
 func (f *fakeCart) AddItem(context.Context, cartpublic.AddItemInput) (cartpublic.Cart, error) {
 	return cartpublic.Cart{}, nil
 }
+func (f *fakeCart) BulkAdd(context.Context, string, []cartpublic.BulkAddItem, bool) ([]bulkdto.BulkResult[cartpublic.Line], cartpublic.Cart, error) {
+	return nil, cartpublic.Cart{}, nil
+}
 func (f *fakeCart) List(context.Context, string, cartpublic.ListFilter) (cartpublic.Page, error) {
 	return cartpublic.Page{}, nil
 }

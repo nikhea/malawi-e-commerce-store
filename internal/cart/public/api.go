@@ -7,6 +7,7 @@ import (
 	"context"
 	"time"
 
+	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/pagination"
 )
 
@@ -38,6 +39,14 @@ type Cart struct {
 // valid only for products with no variants (stock is tracked per SKU).
 type AddItemInput struct {
 	UserID    string
+	ProductID string
+	VariantID *string
+	Qty       int
+}
+
+// BulkAddItem is one line in a bulk add. Identity stays on the JWT caller;
+// the body never carries a user id.
+type BulkAddItem struct {
 	ProductID string
 	VariantID *string
 	Qty       int
@@ -83,6 +92,10 @@ type Service interface {
 	// AddItem validates against the catalog, snapshots the price, and
 	// merges qty into an existing line for the same product/variant.
 	AddItem(ctx context.Context, in AddItemInput) (Cart, error)
+	// BulkAdd adds up to 25 lines in one request. Per-item results carry
+	// the written line; the second return is the full cart after the
+	// batch. Duplicate line keys reject the whole request.
+	BulkAdd(ctx context.Context, userID string, items []BulkAddItem, atomic bool) ([]bulkdto.BulkResult[Line], Cart, error)
 	// SetQty changes a line's quantity; qty 0 removes the line.
 	SetQty(ctx context.Context, userID, itemID string, qty int) (Cart, error)
 	// RemoveItem drops one line. Unknown id = NOT_FOUND.
