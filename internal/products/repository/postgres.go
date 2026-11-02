@@ -27,6 +27,44 @@ func NewPostgres(pool *pgxpool.Pool) *Postgres {
 const productColumns = `p.id, p.category_id, c.name AS category_name, p.name, p.slug, p.description, p.price_cents, p.currency, p.image_url, p.image_public_id, p.is_active, p.created_at, p.updated_at`
 const productFrom = `FROM products p LEFT JOIN categories c ON c.id = p.category_id`
 
+// dbQuerier is satisfied by both *pgxpool.Pool and pgx.Tx, so bulk
+// transactions and single-row reads share the projection helpers.
+type dbQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+// getByIDs re-reads rows (with the category JOIN) and returns them in the
+// caller's id order. Bulk endpoints depend on that order for indexing.
+func getByIDs(ctx context.Context, q dbQuerier, ids []string) ([]model.Product, error) {
+	const sql = `SELECT ` + productColumns + ` ` + productFrom + ` WHERE p.id = ANY($1)`
+	rows, err := q.Query(ctx, sql, ids)
+	if err != nil {
+		return nil, apperr.Internal(err)
+	}
+	defer rows.Close()
+	byID := make(map[string]model.Product, len(ids))
+	for rows.Next() {
+		p, err := scanProduct(rows)
+		if err != nil {
+			return nil, err
+		}
+		byID[p.ID] = p
+	}
+	if err := rows.Err(); err != nil {
+		return nil, apperr.Internal(err)
+	}
+	out := make([]model.Product, 0, len(ids))
+	for _, id := range ids {
+		p, ok := byID[id]
+		if !ok {
+			return nil, apperr.Internal(fmt.Errorf("product %s disappeared mid-transaction", id))
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
 func scanProduct(row pgx.Row) (model.Product, error) {
 	var p model.Product
 	var categoryName *string
@@ -62,6 +100,19 @@ func (r *Postgres) Create(ctx context.Context, p model.Product) (model.Product, 
 	return r.GetByID(ctx, created.ID)
 }
 
+func mapCreateErr(err error) error {
+	switch pgCode(err) {
+	case "23505":
+		return apperr.Conflict("slug already in use")
+	case "23503":
+		return apperr.NotFound("category not found")
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return apperr.Internal(fmt.Errorf("insert returned no id"))
+	}
+	return apperr.Internal(err)
+}
+
 func (r *Postgres) createRow(ctx context.Context, p model.Product) (model.Product, error) {
 	const q = `INSERT INTO products (category_id, name, slug, description, price_cents, currency, image_url)
 	           VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -70,16 +121,7 @@ func (r *Postgres) createRow(ctx context.Context, p model.Product) (model.Produc
 	err := r.pool.QueryRow(ctx, q, p.CategoryID, p.Name, p.Slug, p.Description,
 		p.PriceCents, p.Currency, p.ImageURL).Scan(&id)
 	if err != nil {
-		switch pgCode(err) {
-		case "23505":
-			return model.Product{}, apperr.Conflict("slug already in use")
-		case "23503":
-			return model.Product{}, apperr.NotFound("category not found")
-		}
-		if errors.Is(err, pgx.ErrNoRows) {
-			return model.Product{}, apperr.Internal(fmt.Errorf("insert returned no id"))
-		}
-		return model.Product{}, apperr.Internal(err)
+		return model.Product{}, mapCreateErr(err)
 	}
 	p.ID = id
 	return p, nil
@@ -163,6 +205,9 @@ func productWhere(f model.ListFilter, tsQuery string) (string, []any, string) {
 
 	if f.ActiveOnly {
 		clauses = append(clauses, "p.is_active")
+	}
+	if len(f.IDs) > 0 {
+		clauses = append(clauses, fmt.Sprintf("p.id = ANY(%s)", add(f.IDs)))
 	}
 	if f.Query != "" {
 		if tsQuery != "" {
@@ -285,6 +330,130 @@ func (r *Postgres) Delete(ctx context.Context, id string) error {
 		return apperr.NotFound("product not found")
 	}
 	return nil
+}
+
+// CreateMany inserts the batch in one transaction. failIndex is -1 on
+// success; on a per-item failure the transaction is rolled back and err is
+// that item's mapped error.
+func (r *Postgres) CreateMany(ctx context.Context, items []model.Product) ([]model.Product, int, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, -1, apperr.Internal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	const q = `INSERT INTO products (category_id, name, slug, description, price_cents, currency, image_url)
+	           VALUES ($1, $2, $3, $4, $5, $6, $7)
+	           RETURNING id`
+	ids := make([]string, len(items))
+	for i, p := range items {
+		err := tx.QueryRow(ctx, q, p.CategoryID, p.Name, p.Slug, p.Description,
+			p.PriceCents, p.Currency, p.ImageURL).Scan(&ids[i])
+		if err != nil {
+			return nil, i, mapCreateErr(err)
+		}
+	}
+	rows, err := getByIDs(ctx, tx, ids)
+	if err != nil {
+		return nil, -1, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, -1, apperr.Internal(err)
+	}
+	return rows, -1, nil
+}
+
+// UpdateMany writes the batch in one transaction. failIndex semantics match
+// CreateMany.
+func (r *Postgres) UpdateMany(ctx context.Context, items []model.Product) ([]model.Product, int, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, -1, apperr.Internal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	const q = `UPDATE products
+	           SET category_id = $2, name = $3, description = $4, price_cents = $5,
+	               currency = $6, is_active = $7, updated_at = now()
+	           WHERE id = $1`
+	ids := make([]string, len(items))
+	for i, p := range items {
+		tag, err := tx.Exec(ctx, q, p.ID, p.CategoryID, p.Name, p.Description,
+			p.PriceCents, p.Currency, p.IsActive)
+		if err != nil {
+			if pgCode(err) == "23503" {
+				return nil, i, apperr.NotFound("category not found")
+			}
+			return nil, i, apperr.Internal(err)
+		}
+		if tag.RowsAffected() == 0 {
+			return nil, i, apperr.NotFound("product not found")
+		}
+		ids[i] = p.ID
+	}
+	rows, err := getByIDs(ctx, tx, ids)
+	if err != nil {
+		return nil, -1, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, -1, apperr.Internal(err)
+	}
+	return rows, -1, nil
+}
+
+// DeleteMany hard-deletes the batch in one transaction. failIndex is -1 on
+// success; otherwise err is the failing row's error and everything rolled
+// back.
+func (r *Postgres) DeleteMany(ctx context.Context, ids []string) (int, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return -1, apperr.Internal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	for i, id := range ids {
+		tag, err := tx.Exec(ctx, `DELETE FROM products WHERE id = $1`, id)
+		if err != nil {
+			return i, apperr.Internal(err)
+		}
+		if tag.RowsAffected() == 0 {
+			return i, apperr.NotFound("product not found")
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return -1, apperr.Internal(err)
+	}
+	return -1, nil
+}
+
+// Blockers counts order history (the only hard-delete blocker), variants,
+// cart lines and wishlist links per product. Missing ids are absent from the
+// map so the service can report them as NOT_FOUND.
+func (r *Postgres) Blockers(ctx context.Context, ids []string) (map[string]model.Blockers, error) {
+	const q = `SELECT p.id,
+		(SELECT COUNT(DISTINCT oi.order_id) FROM order_items oi WHERE oi.product_id = p.id),
+		(SELECT COUNT(*) FROM variants v WHERE v.product_id = p.id),
+		(SELECT COUNT(*) FROM cart_items ci WHERE ci.product_id = p.id),
+		(SELECT COUNT(*) FROM wishlist_items w WHERE w.product_id = p.id)
+		FROM products p WHERE p.id = ANY($1)`
+	rows, err := r.pool.Query(ctx, q, ids)
+	if err != nil {
+		return nil, apperr.Internal(err)
+	}
+	defer rows.Close()
+	out := make(map[string]model.Blockers, len(ids))
+	for rows.Next() {
+		var id string
+		var b model.Blockers
+		if err := rows.Scan(&id, &b.OrderItems, &b.Variants, &b.CartLines, &b.WishlistItems); err != nil {
+			return nil, apperr.Internal(err)
+		}
+		out[id] = b
+	}
+	if err := rows.Err(); err != nil {
+		return nil, apperr.Internal(err)
+	}
+	return out, nil
 }
 
 func (r *Postgres) SetImage(ctx context.Context, id, url, publicID string) (model.Product, error) {

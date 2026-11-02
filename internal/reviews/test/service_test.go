@@ -10,6 +10,7 @@ import (
 	"github.com/nikhea/malawi-e-commerce-store/internal/reviews/service"
 	userspublic "github.com/nikhea/malawi-e-commerce-store/internal/users/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
+	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
 )
 
 // fakeRepo is an in-memory review store.
@@ -270,3 +271,14 @@ func TestReviewLifecycle(t *testing.T) {
 }
 
 func intptr(i int) *int { return &i }
+
+// Bulk admin writes are not exercised by this module's tests.
+func (fakeProducts) BulkCreate(context.Context, []productspublic.CreateProductInput, bool, bool) ([]bulkdto.BulkResult[productspublic.Product], error) {
+	return nil, nil
+}
+func (fakeProducts) BulkUpdate(context.Context, []productspublic.BulkUpdateItem, bool, bool) ([]bulkdto.BulkResult[productspublic.Product], error) {
+	return nil, nil
+}
+func (fakeProducts) BulkDelete(context.Context, []string, bool, bool) ([]bulkdto.BulkResult[bulkdto.Empty], error) {
+	return nil, nil
+}

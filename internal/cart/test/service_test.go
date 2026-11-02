@@ -10,6 +10,7 @@ import (
 	productspublic "github.com/nikhea/malawi-e-commerce-store/internal/products/public"
 	userspublic "github.com/nikhea/malawi-e-commerce-store/internal/users/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
+	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
 )
 
 // fakeRepo is an in-memory cart store.
@@ -320,4 +321,15 @@ func TestQtyLifecycle(t *testing.T) {
 	if _, err := svc.SetQty(ctx, "u1", itemID, 2); apperr.CodeOf(err) != apperr.CodeNotFound {
 		t.Fatalf("expected NOT_FOUND, got %v", err)
 	}
+}
+
+// Bulk admin writes are not exercised by this module's tests.
+func (fakeProducts) BulkCreate(context.Context, []productspublic.CreateProductInput, bool, bool) ([]bulkdto.BulkResult[productspublic.Product], error) {
+	return nil, nil
+}
+func (fakeProducts) BulkUpdate(context.Context, []productspublic.BulkUpdateItem, bool, bool) ([]bulkdto.BulkResult[productspublic.Product], error) {
+	return nil, nil
+}
+func (fakeProducts) BulkDelete(context.Context, []string, bool, bool) ([]bulkdto.BulkResult[bulkdto.Empty], error) {
+	return nil, nil
 }

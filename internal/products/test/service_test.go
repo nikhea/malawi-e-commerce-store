@@ -2,6 +2,7 @@ package test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -14,6 +15,8 @@ import (
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
 )
 
+var errBulk = errors.New("bulk write failed")
+
 // fakeRepo is an in-memory product store. No real DB.
 type fakeRepo struct {
 	byID       map[string]model.Product
@@ -21,19 +24,46 @@ type fakeRepo struct {
 	lastFilter model.ListFilter
 	images     map[string][]model.Image
 	nextImage  int
+	// Blocker counters are opt-in: tests seed only the rows they need.
+	orderItems map[string]int
+	variants   map[string]int
+	cartLines  map[string]int
+	wishlists  map[string]int
+	failBulkAt int // atomic batch index that fails; -1 disables
 }
 
 func newFakeRepo(seed ...model.Product) *fakeRepo {
 	f := &fakeRepo{
-		byID:   map[string]model.Product{},
-		bySlug: map[string]string{},
-		images: map[string][]model.Image{},
+		byID:       map[string]model.Product{},
+		bySlug:     map[string]string{},
+		images:     map[string][]model.Image{},
+		orderItems: map[string]int{},
+		variants:   map[string]int{},
+		cartLines:  map[string]int{},
+		wishlists:  map[string]int{},
+		failBulkAt: -1,
 	}
 	for _, p := range seed {
 		f.byID[p.ID] = p
 		f.bySlug[p.Slug] = p.ID
 	}
 	return f
+}
+
+func (f *fakeRepo) snapshot() (map[string]model.Product, map[string]string) {
+	byID := make(map[string]model.Product, len(f.byID))
+	for k, v := range f.byID {
+		byID[k] = v
+	}
+	bySlug := make(map[string]string, len(f.bySlug))
+	for k, v := range f.bySlug {
+		bySlug[k] = v
+	}
+	return byID, bySlug
+}
+
+func (f *fakeRepo) restore(byID map[string]model.Product, bySlug map[string]string) {
+	f.byID, f.bySlug = byID, bySlug
 }
 
 func (f *fakeRepo) Create(_ context.Context, p model.Product) (model.Product, error) {
@@ -66,10 +96,84 @@ func (f *fakeRepo) GetBySlug(_ context.Context, slug string) (model.Product, err
 func (f *fakeRepo) List(_ context.Context, filter model.ListFilter) ([]model.Product, int64, error) {
 	f.lastFilter = filter
 	out := []model.Product{}
+	wanted := map[string]bool{}
+	for _, id := range filter.IDs {
+		wanted[id] = true
+	}
 	for _, p := range f.byID {
+		if len(wanted) > 0 && !wanted[p.ID] {
+			continue
+		}
 		out = append(out, p)
 	}
 	return out, int64(len(out)), nil
+}
+
+func (f *fakeRepo) CreateMany(_ context.Context, items []model.Product) ([]model.Product, int, error) {
+	byID, bySlug := f.snapshot()
+	out := make([]model.Product, 0, len(items))
+	for i, p := range items {
+		if i == f.failBulkAt {
+			f.restore(byID, bySlug)
+			return nil, i, apperr.Internal(errBulk)
+		}
+		created, err := f.Create(context.Background(), p)
+		if err != nil {
+			f.restore(byID, bySlug)
+			return nil, i, err
+		}
+		out = append(out, created)
+	}
+	return out, -1, nil
+}
+
+func (f *fakeRepo) UpdateMany(_ context.Context, items []model.Product) ([]model.Product, int, error) {
+	byID, bySlug := f.snapshot()
+	out := make([]model.Product, 0, len(items))
+	for i, p := range items {
+		if i == f.failBulkAt {
+			f.restore(byID, bySlug)
+			return nil, i, apperr.Internal(errBulk)
+		}
+		updated, err := f.Update(context.Background(), p)
+		if err != nil {
+			f.restore(byID, bySlug)
+			return nil, i, err
+		}
+		out = append(out, updated)
+	}
+	return out, -1, nil
+}
+
+func (f *fakeRepo) DeleteMany(_ context.Context, ids []string) (int, error) {
+	byID, bySlug := f.snapshot()
+	for i, id := range ids {
+		if i == f.failBulkAt {
+			f.restore(byID, bySlug)
+			return i, apperr.Internal(errBulk)
+		}
+		if err := f.Delete(context.Background(), id); err != nil {
+			f.restore(byID, bySlug)
+			return i, err
+		}
+	}
+	return -1, nil
+}
+
+func (f *fakeRepo) Blockers(_ context.Context, ids []string) (map[string]model.Blockers, error) {
+	out := make(map[string]model.Blockers, len(ids))
+	for _, id := range ids {
+		if _, ok := f.byID[id]; !ok {
+			continue
+		}
+		out[id] = model.Blockers{
+			OrderItems:    f.orderItems[id],
+			Variants:      f.variants[id],
+			CartLines:     f.cartLines[id],
+			WishlistItems: f.wishlists[id],
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeRepo) Update(_ context.Context, p model.Product) (model.Product, error) {
@@ -550,5 +654,331 @@ func TestGalleryValidationAndMissingRows(t *testing.T) {
 	// A job whose row was deleted while queued is a no-op, not an error.
 	if err := svc.CompleteImage(ctx, "missing", "https://cdn/x.jpg", "x"); err != nil {
 		t.Fatalf("missing row should complete silently: %v", err)
+	}
+}
+
+func TestBulkCreate(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("happy path", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := service.NewService(repo, fakeCategories{}, fakeVariants{})
+
+		results, err := svc.BulkCreate(ctx, []public.CreateProductInput{
+			{Name: "Sunseed Oil", PriceCents: 100},
+			{Name: "Soap", PriceCents: 200, CategoryID: strptr("cat-1")},
+		}, false, false)
+		if err != nil {
+			t.Fatalf("bulk create: %v", err)
+		}
+		if len(results) != 2 || results[0].Status != "ok" || results[1].Status != "ok" {
+			t.Fatalf("bad results: %+v", results)
+		}
+		if results[0].ID != "sunseed-oil" || results[0].Data == nil || results[0].Data.Slug != "sunseed-oil" {
+			t.Fatalf("bad first row: %+v", results[0])
+		}
+		if len(repo.byID) != 2 {
+			t.Fatalf("expected two writes, got %d", len(repo.byID))
+		}
+	})
+
+	t.Run("duplicate slug rejects whole request", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := service.NewService(repo, fakeCategories{}, fakeVariants{})
+		_, err := svc.BulkCreate(ctx, []public.CreateProductInput{
+			{Name: "Oil", PriceCents: 100},
+			{Name: "Oil", PriceCents: 100},
+		}, false, false)
+		if apperr.CodeOf(err) != apperr.CodeDuplicateItem {
+			t.Fatalf("expected DUPLICATE_ITEM, got %v", err)
+		}
+		if len(repo.byID) != 0 {
+			t.Fatalf("duplicate request wrote rows: %+v", repo.byID)
+		}
+	})
+
+	t.Run("cap", func(t *testing.T) {
+		items := make([]public.CreateProductInput, 51)
+		for i := range items {
+			items[i] = public.CreateProductInput{Name: fmt.Sprintf("P%d", i), PriceCents: 1}
+		}
+		svc := service.NewService(newFakeRepo(), fakeCategories{}, fakeVariants{})
+		if _, err := svc.BulkCreate(ctx, items, false, false); apperr.CodeOf(err) != apperr.CodeBulkLimitExceeded {
+			t.Fatalf("expected BULK_LIMIT_EXCEEDED, got %v", err)
+		}
+	})
+
+	t.Run("slug conflict is per item", func(t *testing.T) {
+		repo := newFakeRepo(model.Product{ID: "existing", Name: "Oil", Slug: "oil"})
+		svc := service.NewService(repo, fakeCategories{}, fakeVariants{})
+		results, err := svc.BulkCreate(ctx, []public.CreateProductInput{
+			{Name: "Oil", PriceCents: 100},
+			{Name: "Soap", PriceCents: 100},
+		}, false, false)
+		if err != nil {
+			t.Fatalf("bulk create: %v", err)
+		}
+		if results[0].Status != "error" || results[0].Error == nil || results[0].Error.Code != apperr.CodeConflict {
+			t.Fatalf("expected per-item CONFLICT: %+v", results[0])
+		}
+		if results[1].Status != "ok" {
+			t.Fatalf("second item should succeed: %+v", results[1])
+		}
+	})
+
+	t.Run("dry run writes nothing", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := service.NewService(repo, fakeCategories{}, fakeVariants{})
+		results, err := svc.BulkCreate(ctx, []public.CreateProductInput{{Name: "Oil", PriceCents: 100}}, false, true)
+		if err != nil {
+			t.Fatalf("dry run: %v", err)
+		}
+		if results[0].Data == nil || results[0].Data.ID != "" || results[0].Data.Slug != "oil" {
+			t.Fatalf("dry run should project without an id: %+v", results[0].Data)
+		}
+		if len(repo.byID) != 0 {
+			t.Fatalf("dry run wrote rows: %+v", repo.byID)
+		}
+	})
+
+	t.Run("atomic rolls back", func(t *testing.T) {
+		repo := newFakeRepo()
+		repo.failBulkAt = 1
+		svc := service.NewService(repo, fakeCategories{}, fakeVariants{})
+		results, err := svc.BulkCreate(ctx, []public.CreateProductInput{
+			{Name: "Oil", PriceCents: 100},
+			{Name: "Soap", PriceCents: 100},
+		}, true, false)
+		if err != nil {
+			t.Fatalf("atomic create: %v", err)
+		}
+		for _, r := range results {
+			if r.Status != "rolled_back" {
+				t.Fatalf("expected rollback: %+v", results)
+			}
+		}
+		if len(repo.byID) != 0 {
+			t.Fatalf("atomic failure leaked rows: %+v", repo.byID)
+		}
+	})
+}
+
+func TestBulkUpdate(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("happy path", func(t *testing.T) {
+		repo := newFakeRepo(
+			model.Product{ID: "p1", Name: "One", Slug: "one", PriceCents: 100},
+			model.Product{ID: "p2", Name: "Two", Slug: "two", PriceCents: 200},
+		)
+		svc := service.NewService(repo, fakeCategories{}, fakeVariants{})
+		results, err := svc.BulkUpdate(ctx, []public.BulkUpdateItem{
+			{ID: "p1", Patch: public.UpdateProductInput{Name: strptr("One v2")}},
+			{ID: "p2", Patch: public.UpdateProductInput{PriceCents: i64ptr(250)}},
+		}, false, false)
+		if err != nil {
+			t.Fatalf("bulk update: %v", err)
+		}
+		if results[0].Data.Name != "One v2" || results[1].Data.PriceCents != 250 {
+			t.Fatalf("bad results: %+v", results)
+		}
+		if repo.byID["p1"].Name != "One v2" || repo.byID["p2"].PriceCents != 250 {
+			t.Fatalf("writes missing: %+v", repo.byID)
+		}
+	})
+
+	t.Run("per-item validation and not found", func(t *testing.T) {
+		repo := newFakeRepo(model.Product{ID: "p1", Name: "One", Slug: "one"})
+		svc := service.NewService(repo, fakeCategories{}, fakeVariants{})
+		results, err := svc.BulkUpdate(ctx, []public.BulkUpdateItem{
+			{ID: "p1", Patch: public.UpdateProductInput{}},
+			{ID: "ghost", Patch: public.UpdateProductInput{Name: strptr("X")}},
+		}, false, false)
+		if err != nil {
+			t.Fatalf("bulk update: %v", err)
+		}
+		if results[0].Error == nil || results[0].Error.Code != apperr.CodeValidation {
+			t.Fatalf("empty patch should be VALIDATION_ERROR: %+v", results[0])
+		}
+		if results[1].Error == nil || results[1].Error.Code != apperr.CodeNotFound {
+			t.Fatalf("unknown id should be NOT_FOUND: %+v", results[1])
+		}
+	})
+
+	t.Run("duplicate ids reject whole request", func(t *testing.T) {
+		svc := service.NewService(newFakeRepo(), fakeCategories{}, fakeVariants{})
+		_, err := svc.BulkUpdate(ctx, []public.BulkUpdateItem{
+			{ID: "p1", Patch: public.UpdateProductInput{Name: strptr("A")}},
+			{ID: "p1", Patch: public.UpdateProductInput{Name: strptr("B")}},
+		}, false, false)
+		if apperr.CodeOf(err) != apperr.CodeDuplicateItem {
+			t.Fatalf("expected DUPLICATE_ITEM, got %v", err)
+		}
+	})
+
+	t.Run("dry run writes nothing", func(t *testing.T) {
+		repo := newFakeRepo(model.Product{ID: "p1", Name: "One", Slug: "one"})
+		svc := service.NewService(repo, fakeCategories{}, fakeVariants{})
+		results, err := svc.BulkUpdate(ctx, []public.BulkUpdateItem{
+			{ID: "p1", Patch: public.UpdateProductInput{Name: strptr("Projected")}},
+		}, false, true)
+		if err != nil {
+			t.Fatalf("dry run: %v", err)
+		}
+		if results[0].Data.Name != "Projected" || repo.byID["p1"].Name != "One" {
+			t.Fatalf("dry run wrote: result=%+v row=%+v", results[0], repo.byID["p1"])
+		}
+	})
+
+	t.Run("atomic rolls back", func(t *testing.T) {
+		repo := newFakeRepo(
+			model.Product{ID: "p1", Name: "One", Slug: "one"},
+			model.Product{ID: "p2", Name: "Two", Slug: "two"},
+		)
+		repo.failBulkAt = 1
+		svc := service.NewService(repo, fakeCategories{}, fakeVariants{})
+		results, err := svc.BulkUpdate(ctx, []public.BulkUpdateItem{
+			{ID: "p1", Patch: public.UpdateProductInput{Name: strptr("A")}},
+			{ID: "p2", Patch: public.UpdateProductInput{Name: strptr("B")}},
+		}, true, false)
+		if err != nil {
+			t.Fatalf("atomic update: %v", err)
+		}
+		for _, r := range results {
+			if r.Status != "rolled_back" {
+				t.Fatalf("expected rollback: %+v", results)
+			}
+		}
+		if repo.byID["p1"].Name != "One" {
+			t.Fatalf("rollback lost original: %+v", repo.byID["p1"])
+		}
+	})
+}
+
+func TestBulkDelete(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("happy path", func(t *testing.T) {
+		repo := newFakeRepo(
+			model.Product{ID: "p1", Name: "One", Slug: "one"},
+			model.Product{ID: "p2", Name: "Two", Slug: "two"},
+		)
+		svc := service.NewService(repo, fakeCategories{}, fakeVariants{})
+		results, err := svc.BulkDelete(ctx, []string{"p1", "p2"}, false, false)
+		if err != nil {
+			t.Fatalf("bulk delete: %v", err)
+		}
+		if results[0].Status != "ok" || results[1].Status != "ok" || len(repo.byID) != 0 {
+			t.Fatalf("bad delete: %+v rows=%+v", results, repo.byID)
+		}
+	})
+
+	t.Run("order history blocks per item", func(t *testing.T) {
+		repo := newFakeRepo(model.Product{ID: "p1", Name: "One", Slug: "one"})
+		repo.orderItems["p1"] = 2
+		svc := service.NewService(repo, fakeCategories{}, fakeVariants{})
+		results, err := svc.BulkDelete(ctx, []string{"p1"}, false, false)
+		if err != nil {
+			t.Fatalf("bulk delete: %v", err)
+		}
+		if results[0].Status != "error" || results[0].Error == nil || results[0].Error.Code != apperr.CodeConflict {
+			t.Fatalf("expected CONFLICT: %+v", results[0])
+		}
+		if _, ok := repo.byID["p1"]; !ok {
+			t.Fatal("blocked product was deleted")
+		}
+	})
+
+	t.Run("dry run reports blockers", func(t *testing.T) {
+		repo := newFakeRepo(
+			model.Product{ID: "p1", Name: "One", Slug: "one"},
+			model.Product{ID: "p2", Name: "Two", Slug: "two"},
+		)
+		repo.orderItems["p1"] = 2
+		repo.variants["p1"] = 1
+		repo.cartLines["p1"] = 3
+		repo.wishlists["p1"] = 4
+		svc := service.NewService(repo, fakeCategories{}, fakeVariants{})
+		results, err := svc.BulkDelete(ctx, []string{"p1", "p2"}, false, true)
+		if err != nil {
+			t.Fatalf("dry run: %v", err)
+		}
+		if results[0].WouldDelete || len(results[0].Blockers) != 4 {
+			t.Fatalf("bad blockers: %+v", results[0])
+		}
+		if !results[1].WouldDelete || len(results[1].Blockers) != 0 {
+			t.Fatalf("clean product should be deletable: %+v", results[1])
+		}
+		if len(repo.byID) != 2 {
+			t.Fatal("dry run deleted rows")
+		}
+	})
+
+	t.Run("cap is 25", func(t *testing.T) {
+		ids := make([]string, 26)
+		for i := range ids {
+			ids[i] = fmt.Sprintf("p%d", i)
+		}
+		svc := service.NewService(newFakeRepo(), fakeCategories{}, fakeVariants{})
+		if _, err := svc.BulkDelete(ctx, ids, false, false); apperr.CodeOf(err) != apperr.CodeBulkLimitExceeded {
+			t.Fatalf("expected BULK_LIMIT_EXCEEDED, got %v", err)
+		}
+	})
+
+	t.Run("missing and duplicate ids", func(t *testing.T) {
+		repo := newFakeRepo(model.Product{ID: "p1", Name: "One", Slug: "one"})
+		svc := service.NewService(repo, fakeCategories{}, fakeVariants{})
+		results, err := svc.BulkDelete(ctx, []string{"ghost"}, false, false)
+		if err != nil {
+			t.Fatalf("bulk delete: %v", err)
+		}
+		if results[0].Error == nil || results[0].Error.Code != apperr.CodeNotFound {
+			t.Fatalf("expected NOT_FOUND: %+v", results[0])
+		}
+		if _, err := svc.BulkDelete(ctx, []string{"p1", "p1"}, false, false); apperr.CodeOf(err) != apperr.CodeDuplicateItem {
+			t.Fatalf("expected DUPLICATE_ITEM, got %v", err)
+		}
+	})
+
+	t.Run("atomic blocked batch rolls back", func(t *testing.T) {
+		repo := newFakeRepo(
+			model.Product{ID: "p1", Name: "One", Slug: "one"},
+			model.Product{ID: "p2", Name: "Two", Slug: "two"},
+		)
+		repo.orderItems["p2"] = 1
+		svc := service.NewService(repo, fakeCategories{}, fakeVariants{})
+		results, err := svc.BulkDelete(ctx, []string{"p1", "p2"}, true, false)
+		if err != nil {
+			t.Fatalf("atomic delete: %v", err)
+		}
+		for _, r := range results {
+			if r.Status != "rolled_back" {
+				t.Fatalf("expected rollback: %+v", results)
+			}
+		}
+		if len(repo.byID) != 2 {
+			t.Fatalf("atomic blocked delete removed rows: %+v", repo.byID)
+		}
+	})
+}
+
+func TestListByIDs(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo(
+		model.Product{ID: "p1", Name: "One", Slug: "one"},
+		model.Product{ID: "p2", Name: "Two", Slug: "two"},
+		model.Product{ID: "p3", Name: "Three", Slug: "three"},
+	)
+	svc := service.NewService(repo, fakeCategories{}, fakeVariants{})
+
+	page, err := svc.List(ctx, public.ListFilter{IDs: []string{" p1 ", "p3"}, ActiveOnly: true})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if page.Meta.Total != 2 {
+		t.Fatalf("expected 2 rows, got %d", page.Meta.Total)
+	}
+	if len(repo.lastFilter.IDs) != 2 || repo.lastFilter.IDs[0] != "p1" || repo.lastFilter.IDs[1] != "p3" {
+		t.Fatalf("ids not forwarded: %+v", repo.lastFilter.IDs)
 	}
 }

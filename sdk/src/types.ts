@@ -36,6 +36,39 @@ export type PaginationMeta = {
 /** Raw paged envelope: `{ data: rows, meta: counters }`. */
 export type Paginated<T> = { data: T[]; meta: PaginationMeta };
 
+/** Batch outcome: only `"ok"` items count as succeeded. */
+export type BulkSummary = { total: number; succeeded: number; failed: number };
+
+/** One machine-readable per-item failure inside a 200 batch response. */
+export type BulkItemError = { code: string; message: string };
+
+/**
+ * One item's outcome. Results are index-aligned with the request so a
+ * client can match failures back to its input. `rolled_back` means an
+ * atomic batch aborted and nothing was written.
+ */
+export type BulkResult<T> = {
+  index: number;
+  id?: string;
+  status: "ok" | "error" | "rolled_back";
+  data?: T;
+  error?: BulkItemError;
+  /** Idempotent customer writes: the thing was already there. */
+  alreadyExists?: boolean;
+  /** Idempotent customer writes: the thing was already gone. */
+  alreadyRemoved?: boolean;
+  /** dryRun only: the row would have been deleted. */
+  wouldDelete?: boolean;
+  /** dryRun only: what would cascade or block the delete. */
+  blockers?: string[];
+};
+
+/** Standard batch payload: per-item results plus counters. */
+export type BulkResponse<T> = { results: BulkResult<T>[]; summary: BulkSummary };
+
+/** Payload for delete-style batch items (no entity to return). */
+export type BulkEmpty = Record<string, never>;
+
 // ---------------------------------------------------------------------------
 // auth — /api/v1/auth (public, rate-limited 10/min/IP)
 // ---------------------------------------------------------------------------
@@ -177,6 +210,8 @@ export type ListProductsParams = {
    * full-text finds nothing.
    */
   q?: string;
+  /** Restrict to product ids (comma-separated; max MAX_BULK_ITEMS). */
+  ids?: string;
   category_id?: string;
   category_slug?: string;
   min_price_cents?: number;
@@ -270,6 +305,39 @@ export type UpdateProductInput = {
   is_active?: boolean;
   clear_category?: boolean;
 };
+
+/** POST /admin/products/bulk. Cap MAX_BULK_ITEMS (default 50). */
+export type BulkCreateProductsInput = {
+  atomic?: boolean;
+  dryRun?: boolean;
+  items: CreateProductInput[];
+};
+
+export type BulkUpdateProductItem = {
+  id: string;
+  patch: UpdateProductInput;
+};
+
+/** PATCH /admin/products/bulk. Duplicate ids reject the whole request. */
+export type BulkUpdateProductsInput = {
+  atomic?: boolean;
+  dryRun?: boolean;
+  updates: BulkUpdateProductItem[];
+};
+
+/**
+ * POST /admin/products/bulk-delete (capped at 25). Products referenced by
+ * order history are blocked per item with `CONFLICT`.
+ */
+export type BulkDeleteProductsInput = {
+  ids: string[];
+  dryRun?: boolean;
+  atomic?: boolean;
+};
+
+export type BulkCreateProductsResponse = BulkResponse<Product>;
+export type BulkUpdateProductsResponse = BulkResponse<Product>;
+export type BulkDeleteProductsResponse = BulkResponse<BulkEmpty>;
 
 export type Variant = {
   id: string;

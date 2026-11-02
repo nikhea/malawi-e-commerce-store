@@ -9,6 +9,7 @@ import (
 	"context"
 	"time"
 
+	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/pagination"
 )
 
@@ -88,9 +89,18 @@ type UpdateProductInput struct {
 	ClearCategory bool
 }
 
+// BulkUpdateItem is one row of a bulk patch: which product, and the same
+// partial patch the single PATCH accepts.
+type BulkUpdateItem struct {
+	ID    string
+	Patch UpdateProductInput
+}
+
 // ListFilter scopes the catalog listing. Zero value = active only,
 // first page, name order (relevance when Query is set).
 type ListFilter struct {
+	// IDs restricts the page to specific product ids (GET /products?ids=).
+	IDs []string
 	// Query runs full-text search over name, description and slug. Word
 	// prefixes match ("cook" finds "cooking"); when nothing matches, the
 	// repository falls back to case-insensitive substring search.
@@ -142,6 +152,13 @@ type Service interface {
 	Update(ctx context.Context, id string, in UpdateProductInput) (Product, error)
 	Delete(ctx context.Context, id string) error
 	SetImage(ctx context.Context, id, url, publicID string) (Product, error)
+
+	// Bulk admin writes. Per-item failures stay inside the 200 envelope;
+	// atomic=true rolls the whole batch back on the first failure. dryRun
+	// validates and projects the outcome without writing.
+	BulkCreate(ctx context.Context, items []CreateProductInput, atomic, dryRun bool) ([]bulkdto.BulkResult[Product], error)
+	BulkUpdate(ctx context.Context, items []BulkUpdateItem, atomic, dryRun bool) ([]bulkdto.BulkResult[Product], error)
+	BulkDelete(ctx context.Context, ids []string, atomic, dryRun bool) ([]bulkdto.BulkResult[bulkdto.Empty], error)
 
 	// Gallery. AddImage creates an empty (pending) row; the handler then
 	// enqueues one media job per row. CompleteImage fills the row and

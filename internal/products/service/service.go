@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	categoriespublic "github.com/nikhea/malawi-e-commerce-store/internal/categories/public"
@@ -9,6 +10,8 @@ import (
 	"github.com/nikhea/malawi-e-commerce-store/internal/products/public"
 	variantspublic "github.com/nikhea/malawi-e-commerce-store/internal/variants/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/bulk"
+	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/pagination"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/slug"
 )
@@ -18,11 +21,18 @@ var _ public.Service = (*service)(nil)
 // Repository is the port this service needs from persistence.
 type Repository interface {
 	Create(ctx context.Context, p model.Product) (model.Product, error)
+	// Bulk writes share one transaction. failIndex is -1 on success; when
+	// >= 0 the batch rolled back and err is that item's failure.
+	CreateMany(ctx context.Context, items []model.Product) ([]model.Product, int, error)
 	GetByID(ctx context.Context, id string) (model.Product, error)
 	GetBySlug(ctx context.Context, slug string) (model.Product, error)
 	List(ctx context.Context, f model.ListFilter) ([]model.Product, int64, error)
 	Update(ctx context.Context, p model.Product) (model.Product, error)
+	UpdateMany(ctx context.Context, items []model.Product) ([]model.Product, int, error)
 	Delete(ctx context.Context, id string) error
+	DeleteMany(ctx context.Context, ids []string) (int, error)
+	// Blockers counts rows that would cascade or block a delete.
+	Blockers(ctx context.Context, ids []string) (map[string]model.Blockers, error)
 	SetImage(ctx context.Context, id, url, publicID string) (model.Product, error)
 
 	CreateImage(ctx context.Context, productID string) (model.Image, error)
@@ -104,20 +114,23 @@ func (s *service) detail(ctx context.Context, p model.Product) (public.Detail, e
 	return toDetail(p, variants, images), nil
 }
 
-func (s *service) Create(ctx context.Context, in public.CreateProductInput) (public.Product, error) {
+// prepareCreate validates and normalizes one new SPU, including the
+// category lookup. Shared by the single and bulk create paths so the two
+// can never drift.
+func (s *service) prepareCreate(ctx context.Context, in public.CreateProductInput) (model.Product, error) {
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
-		return public.Product{}, apperr.Validation("name is required")
+		return model.Product{}, apperr.Validation("name is required")
 	}
 	slugStr := strings.ToLower(strings.TrimSpace(in.Slug))
 	if slugStr == "" {
 		slugStr = slug.Make(name)
 	}
 	if slugStr == "" {
-		return public.Product{}, apperr.Validation("slug is required")
+		return model.Product{}, apperr.Validation("slug is required")
 	}
 	if in.PriceCents < 0 {
-		return public.Product{}, apperr.Validation("price cannot be negative")
+		return model.Product{}, apperr.Validation("price cannot be negative")
 	}
 	currency := strings.ToUpper(strings.TrimSpace(in.Currency))
 	if currency == "" {
@@ -125,16 +138,23 @@ func (s *service) Create(ctx context.Context, in public.CreateProductInput) (pub
 	}
 	if in.CategoryID != nil {
 		if _, err := s.categories.GetByID(ctx, *in.CategoryID); err != nil {
-			return public.Product{}, err // NOT_FOUND passes through
+			return model.Product{}, err // NOT_FOUND passes through
 		}
 	}
-
-	p, err := s.repo.Create(ctx, model.Product{
+	return model.Product{
 		CategoryID: in.CategoryID, Name: name, Slug: slugStr,
 		Description: strings.TrimSpace(in.Description),
 		PriceCents:  in.PriceCents, Currency: currency,
 		ImageURL: strings.TrimSpace(in.ImageURL),
-	})
+	}, nil
+}
+
+func (s *service) Create(ctx context.Context, in public.CreateProductInput) (public.Product, error) {
+	prepared, err := s.prepareCreate(ctx, in)
+	if err != nil {
+		return public.Product{}, err
+	}
+	p, err := s.repo.Create(ctx, prepared)
 	if err != nil {
 		return public.Product{}, err
 	}
@@ -229,9 +249,15 @@ func (s *service) List(ctx context.Context, f public.ListFilter) (public.Page, e
 	size := strings.TrimSpace(f.Size)
 	categoryID := trimOptional(f.CategoryID)
 	categorySlug := trimOptional(f.CategorySlug)
+	ids := make([]string, 0, len(f.IDs))
+	for _, id := range f.IDs {
+		if trimmed := strings.TrimSpace(id); trimmed != "" {
+			ids = append(ids, trimmed)
+		}
+	}
 
 	products, total, err := s.repo.List(ctx, model.ListFilter{
-		Query: query, CategoryID: categoryID, CategorySlug: categorySlug,
+		IDs: ids, Query: query, CategoryID: categoryID, CategorySlug: categorySlug,
 		MinPriceCents: f.MinPriceCents, MaxPriceCents: f.MaxPriceCents,
 		InStock: f.InStock, Size: size, MinRating: f.MinRating,
 		CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore,
@@ -260,19 +286,13 @@ func trimOptional(v *string) *string {
 	return &trimmed
 }
 
-func (s *service) Update(ctx context.Context, id string, in public.UpdateProductInput) (public.Product, error) {
-	if strings.TrimSpace(id) == "" {
-		return public.Product{}, apperr.Validation("id is required")
-	}
-	current, err := s.repo.GetByID(ctx, id)
-	if err != nil {
-		return public.Product{}, err
-	}
-
+// applyUpdate projects a patch onto the current row. It performs no writes:
+// single update, bulk update and dry runs share this exact semantics.
+func (s *service) applyUpdate(ctx context.Context, current model.Product, in public.UpdateProductInput) (model.Product, error) {
 	if in.Name != nil {
 		name := strings.TrimSpace(*in.Name)
 		if name == "" {
-			return public.Product{}, apperr.Validation("name is required")
+			return model.Product{}, apperr.Validation("name is required")
 		}
 		current.Name = name
 	}
@@ -281,14 +301,14 @@ func (s *service) Update(ctx context.Context, id string, in public.UpdateProduct
 	}
 	if in.PriceCents != nil {
 		if *in.PriceCents < 0 {
-			return public.Product{}, apperr.Validation("price cannot be negative")
+			return model.Product{}, apperr.Validation("price cannot be negative")
 		}
 		current.PriceCents = *in.PriceCents
 	}
 	if in.Currency != nil {
 		currency := strings.ToUpper(strings.TrimSpace(*in.Currency))
 		if currency == "" {
-			return public.Product{}, apperr.Validation("currency is required")
+			return model.Product{}, apperr.Validation("currency is required")
 		}
 		current.Currency = currency
 	}
@@ -300,13 +320,27 @@ func (s *service) Update(ctx context.Context, id string, in public.UpdateProduct
 		current.CategoryID = nil
 	case in.CategoryID != nil:
 		if _, err := s.categories.GetByID(ctx, *in.CategoryID); err != nil {
-			return public.Product{}, err
+			return model.Product{}, err
 		}
 		current.CategoryID = in.CategoryID
 	}
 	// NOTE: slug is immutable (URLs must not rot).
+	return current, nil
+}
 
-	updated, err := s.repo.Update(ctx, current)
+func (s *service) Update(ctx context.Context, id string, in public.UpdateProductInput) (public.Product, error) {
+	if strings.TrimSpace(id) == "" {
+		return public.Product{}, apperr.Validation("id is required")
+	}
+	current, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return public.Product{}, err
+	}
+	projected, err := s.applyUpdate(ctx, current, in)
+	if err != nil {
+		return public.Product{}, err
+	}
+	updated, err := s.repo.Update(ctx, projected)
 	if err != nil {
 		return public.Product{}, err
 	}
@@ -318,6 +352,285 @@ func (s *service) Delete(ctx context.Context, id string) error {
 		return apperr.Validation("id is required")
 	}
 	return s.repo.Delete(ctx, id)
+}
+
+// BulkCreate creates many products. Validation is per item; a duplicate
+// resulting slug is a whole-request rejection because it makes the batch
+// ambiguous. With atomic=true nothing is written unless every item is valid.
+func (s *service) BulkCreate(ctx context.Context, items []public.CreateProductInput, atomic, dryRun bool) ([]bulkdto.BulkResult[public.Product], error) {
+	if err := bulk.CheckCount(len(items), bulk.MaxItems()); err != nil {
+		return nil, err
+	}
+
+	prepared := make([]model.Product, len(items))
+	prepErrs := make([]error, len(items))
+	slugs := make([]string, 0, len(items))
+	for i, in := range items {
+		p, err := s.prepareCreate(ctx, in)
+		prepared[i], prepErrs[i] = p, err
+		if err == nil {
+			slugs = append(slugs, p.Slug)
+		}
+	}
+	if dup, ok := bulk.FindDuplicate(slugs); ok {
+		return nil, apperr.Duplicate("duplicate product slug: " + dup)
+	}
+
+	results := make([]bulkdto.BulkResult[public.Product], len(items))
+	for i := range items {
+		results[i] = bulkdto.BulkResult[public.Product]{Index: i, ID: prepared[i].Slug, Status: "ok"}
+		if prepErrs[i] != nil {
+			results[i] = bulk.Failed[public.Product](i, prepared[i].Slug, prepErrs[i])
+		}
+	}
+
+	if dryRun {
+		for i := range items {
+			if prepErrs[i] == nil {
+				results[i] = bulk.OK(i, prepared[i].Slug, toPublic(prepared[i]))
+			}
+		}
+		return results, nil
+	}
+
+	if atomic {
+		for i, err := range prepErrs {
+			if err != nil {
+				return bulk.Rollback(results, i, err), nil
+			}
+		}
+		created, failIndex, err := s.repo.CreateMany(ctx, prepared)
+		if err != nil {
+			if failIndex < 0 {
+				failIndex = 0 // fatal tx error: surface it on the first item
+			}
+			return bulk.Rollback(results, failIndex, err), nil
+		}
+		for i := range items {
+			results[i] = bulk.OK(i, created[i].Slug, toPublic(created[i]))
+		}
+		return results, nil
+	}
+
+	for i := range items {
+		if prepErrs[i] != nil {
+			continue
+		}
+		p, err := s.repo.Create(ctx, prepared[i])
+		if err != nil {
+			results[i] = bulk.Failed[public.Product](i, prepared[i].Slug, err)
+			continue
+		}
+		results[i] = bulk.OK(i, p.Slug, toPublic(p))
+	}
+	return results, nil
+}
+
+func isEmptyPatch(in public.UpdateProductInput) bool {
+	return in.CategoryID == nil && in.Name == nil && in.Description == nil &&
+		in.PriceCents == nil && in.Currency == nil && in.IsActive == nil &&
+		!in.ClearCategory
+}
+
+// BulkUpdate applies one patch per product. Empty patches are per-item
+// validation errors; duplicate ids reject the whole batch.
+func (s *service) BulkUpdate(ctx context.Context, items []public.BulkUpdateItem, atomic, dryRun bool) ([]bulkdto.BulkResult[public.Product], error) {
+	if err := bulk.CheckCount(len(items), bulk.MaxItems()); err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(items))
+	for i, it := range items {
+		ids[i] = strings.TrimSpace(it.ID)
+	}
+	if dup, ok := bulk.FindDuplicate(ids); ok {
+		return nil, apperr.Duplicate("duplicate product id: " + dup)
+	}
+
+	projected := make([]model.Product, len(items))
+	itemErrs := make([]error, len(items))
+	results := make([]bulkdto.BulkResult[public.Product], len(items))
+	for i, it := range items {
+		results[i] = bulkdto.BulkResult[public.Product]{Index: i, ID: ids[i], Status: "ok"}
+		if ids[i] == "" {
+			itemErrs[i] = apperr.Validation("id is required")
+			results[i] = bulk.Failed[public.Product](i, ids[i], itemErrs[i])
+			continue
+		}
+		if isEmptyPatch(it.Patch) {
+			itemErrs[i] = apperr.Validation("at least one field is required")
+			results[i] = bulk.Failed[public.Product](i, ids[i], itemErrs[i])
+			continue
+		}
+		current, err := s.repo.GetByID(ctx, ids[i])
+		if err != nil {
+			itemErrs[i] = err
+			results[i] = bulk.Failed[public.Product](i, ids[i], err)
+			continue
+		}
+		updated, err := s.applyUpdate(ctx, current, it.Patch)
+		if err != nil {
+			itemErrs[i] = err
+			results[i] = bulk.Failed[public.Product](i, ids[i], err)
+			continue
+		}
+		projected[i] = updated
+	}
+
+	if dryRun {
+		for i := range items {
+			if itemErrs[i] == nil {
+				results[i] = bulk.OK(i, ids[i], toPublic(projected[i]))
+			}
+		}
+		return results, nil
+	}
+
+	if atomic {
+		for i, err := range itemErrs {
+			if err != nil {
+				return bulk.Rollback(results, i, err), nil
+			}
+		}
+		rows, failIndex, err := s.repo.UpdateMany(ctx, projected)
+		if err != nil {
+			if failIndex < 0 {
+				failIndex = 0
+			}
+			return bulk.Rollback(results, failIndex, err), nil
+		}
+		for i := range items {
+			results[i] = bulk.OK(i, ids[i], toPublic(rows[i]))
+		}
+		return results, nil
+	}
+
+	for i := range items {
+		if itemErrs[i] != nil {
+			continue
+		}
+		row, err := s.repo.Update(ctx, projected[i])
+		if err != nil {
+			results[i] = bulk.Failed[public.Product](i, ids[i], err)
+			continue
+		}
+		results[i] = bulk.OK(i, ids[i], toPublic(row))
+	}
+	return results, nil
+}
+
+// BulkDelete hard-deletes products, capped lower than other batches (25).
+// A product referenced by order history is blocked per item: orders keep
+// snapshots but must stay attributable to a real catalog row.
+func (s *service) BulkDelete(ctx context.Context, ids []string, atomic, dryRun bool) ([]bulkdto.BulkResult[bulkdto.Empty], error) {
+	limit := 25
+	if max := bulk.MaxItems(); max < limit {
+		limit = max
+	}
+	if err := bulk.CheckCount(len(ids), limit); err != nil {
+		return nil, err
+	}
+	for i := range ids {
+		ids[i] = strings.TrimSpace(ids[i])
+	}
+	if dup, ok := bulk.FindDuplicate(ids); ok {
+		return nil, apperr.Duplicate("duplicate product id: " + dup)
+	}
+	queryIDs := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id != "" {
+			queryIDs = append(queryIDs, id)
+		}
+	}
+	blockers, err := s.repo.Blockers(ctx, queryIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]bulkdto.BulkResult[bulkdto.Empty], len(ids))
+	for i, id := range ids {
+		results[i] = bulkdto.BulkResult[bulkdto.Empty]{Index: i, ID: id, Status: "ok"}
+		if id == "" {
+			results[i] = bulk.Failed[bulkdto.Empty](i, id, apperr.Validation("id is required"))
+			continue
+		}
+		if _, ok := blockers[id]; !ok {
+			results[i] = bulk.Failed[bulkdto.Empty](i, id, apperr.NotFound("product not found"))
+		}
+	}
+	if dryRun {
+		for i, id := range ids {
+			b, ok := blockers[id]
+			if !ok {
+				continue
+			}
+			results[i].WouldDelete = b.OrderItems == 0
+			results[i].Blockers = blockMessages(b)
+		}
+		return results, nil
+	}
+
+	blocked := func(b model.Blockers) error {
+		return apperr.Conflict("product is referenced by existing orders")
+	}
+
+	if atomic {
+		for i, id := range ids {
+			if id == "" {
+				return bulk.Rollback(results, i, apperr.Validation("id is required")), nil
+			}
+			b, ok := blockers[id]
+			if !ok {
+				return bulk.Rollback(results, i, apperr.NotFound("product not found")), nil
+			}
+			if b.OrderItems > 0 {
+				return bulk.Rollback(results, i, blocked(b)), nil
+			}
+		}
+		if failIndex, err := s.repo.DeleteMany(ctx, ids); err != nil {
+			if failIndex < 0 {
+				failIndex = 0
+			}
+			return bulk.Rollback(results, failIndex, err), nil
+		}
+		for i, id := range ids {
+			results[i] = bulk.OK[bulkdto.Empty](i, id, bulkdto.Empty{})
+		}
+		return results, nil
+	}
+
+	for i, id := range ids {
+		b, ok := blockers[id]
+		if !ok {
+			continue // already marked NOT_FOUND
+		}
+		if b.OrderItems > 0 {
+			results[i] = bulk.Failed[bulkdto.Empty](i, id, blocked(b))
+			continue
+		}
+		if err := s.repo.Delete(ctx, id); err != nil {
+			results[i] = bulk.Failed[bulkdto.Empty](i, id, err)
+			continue
+		}
+		results[i] = bulk.OK[bulkdto.Empty](i, id, bulkdto.Empty{})
+	}
+	return results, nil
+}
+
+func blockMessages(b model.Blockers) []string {
+	out := []string{}
+	if b.OrderItems > 0 {
+		out = append(out, fmt.Sprintf("referenced by %d orders", b.OrderItems))
+	}
+	if b.Variants > 0 {
+		out = append(out, fmt.Sprintf("has %d variants", b.Variants))
+	}
+	if b.CartLines > 0 {
+		out = append(out, fmt.Sprintf("in %d carts", b.CartLines))
+	}
+	if b.WishlistItems > 0 {
+		out = append(out, fmt.Sprintf("in %d wishlists", b.WishlistItems))
+	}
+	return out
 }
 
 func (s *service) SetImage(ctx context.Context, id, url, publicID string) (public.Product, error) {

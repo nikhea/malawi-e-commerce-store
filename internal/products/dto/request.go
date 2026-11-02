@@ -1,5 +1,10 @@
 package dto
 
+import (
+	"github.com/nikhea/malawi-e-commerce-store/internal/products/public"
+	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
+)
+
 // CreateProductRequest is the POST /admin/products body. Price is USD
 // cents: 12500 = $125.00.
 type CreateProductRequest struct {
@@ -23,6 +28,40 @@ type UpdateProductRequest struct {
 	IsActive      *bool   `json:"is_active,omitempty"`
 	ClearCategory bool    `json:"clear_category,omitempty"`
 }
+
+// BulkCreateProductsRequest is the POST /admin/products/bulk body.
+type BulkCreateProductsRequest struct {
+	Atomic bool                   `json:"atomic"`
+	DryRun bool                   `json:"dryRun"`
+	Items  []CreateProductRequest `json:"items" binding:"required"`
+}
+
+// BulkUpdateProductItem pairs one product id with the fields to patch.
+type BulkUpdateProductItem struct {
+	ID    string               `json:"id" binding:"required" example:"3fa85f64-5717-4562-b3fc-2c963f66afa6"`
+	Patch UpdateProductRequest `json:"patch" binding:"required"`
+}
+
+// BulkUpdateProductsRequest is the PATCH /admin/products/bulk body.
+type BulkUpdateProductsRequest struct {
+	Atomic  bool                    `json:"atomic"`
+	DryRun  bool                    `json:"dryRun"`
+	Updates []BulkUpdateProductItem `json:"updates" binding:"required"`
+}
+
+// BulkDeleteProductsRequest is the POST /admin/products/bulk-delete body.
+// Delete is a POST so the id list can travel in JSON.
+type BulkDeleteProductsRequest struct {
+	IDs    []string `json:"ids" binding:"required"`
+	DryRun bool     `json:"dryRun"`
+	Atomic bool     `json:"atomic"`
+}
+
+// Named response types keep swag happy: it cannot parse a generic
+// instantiation inside an annotation, but resolves a named alias.
+type BulkCreateProductsResponse bulkdto.BulkResponse[public.Product]
+type BulkUpdateProductsResponse bulkdto.BulkResponse[public.Product]
+type BulkDeleteProductsResponse bulkdto.BulkResponse[bulkdto.Empty]
 
 // ListProductsQuery binds the storefront catalog filters. Dates accept
 // RFC3339 or YYYY-MM-DD; page wins over offset when both are sent.

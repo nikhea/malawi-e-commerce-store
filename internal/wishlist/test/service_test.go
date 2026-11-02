@@ -10,6 +10,7 @@ import (
 	"github.com/nikhea/malawi-e-commerce-store/internal/wishlist/public"
 	"github.com/nikhea/malawi-e-commerce-store/internal/wishlist/service"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
+	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
 )
 
 // fakeRepo is an in-memory link store.
@@ -169,4 +170,15 @@ func TestWishlist(t *testing.T) {
 	if err := svc.Remove(ctx, "u1", "prod-1"); apperr.CodeOf(err) != apperr.CodeNotFound {
 		t.Fatalf("expected NOT_FOUND, got %v", err)
 	}
+}
+
+// Bulk admin writes are not exercised by this module's tests.
+func (fakeProducts) BulkCreate(context.Context, []productspublic.CreateProductInput, bool, bool) ([]bulkdto.BulkResult[productspublic.Product], error) {
+	return nil, nil
+}
+func (fakeProducts) BulkUpdate(context.Context, []productspublic.BulkUpdateItem, bool, bool) ([]bulkdto.BulkResult[productspublic.Product], error) {
+	return nil, nil
+}
+func (fakeProducts) BulkDelete(context.Context, []string, bool, bool) ([]bulkdto.BulkResult[bulkdto.Empty], error) {
+	return nil, nil
 }

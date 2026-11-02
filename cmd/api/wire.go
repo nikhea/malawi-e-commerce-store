@@ -273,7 +273,7 @@ func registerRoutes(r *gin.Engine, a *app) {
 	users.RegisterRoutes(protected, a.usersSvc)
 	categories.RegisterRoutes(open, protected, a.categoriesSvc, a.mediaSvc)
 	variants.RegisterRoutes(open, protected, a.variantsSvc)
-	products.RegisterRoutes(open, protected, a.productsSvc, a.mediaSvc)
+	products.RegisterRoutes(open, protected, a.productsSvc, a.mediaSvc, a.idemStore)
 	cart.RegisterRoutes(protected, a.cartSvc)
 	inventory.RegisterRoutes(protected, a.inventorySvc, a.idemStore)
 	orders.RegisterRoutes(protected, a.ordersSvc)

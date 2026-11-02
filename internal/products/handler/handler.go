@@ -13,6 +13,7 @@ import (
 	"github.com/nikhea/malawi-e-commerce-store/internal/products/dto"
 	"github.com/nikhea/malawi-e-commerce-store/internal/products/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/bulk"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/response"
 )
 
@@ -40,6 +41,7 @@ func New(svc public.Service, media mediapublic.Service) *Handler {
 // @Tags products
 // @Produce json
 // @Param q query string false "Full-text search over name, description and slug (word prefixes; substring fallback)"
+// @Param ids query []string false "Restrict to product ids (comma separated or repeated, max MAX_BULK_ITEMS)"
 // @Param category_id query string false "Filter by category UUID"
 // @Param category_slug query string false "Filter by category slug"
 // @Param min_price_cents query int false "Minimum price in USD cents"
@@ -77,8 +79,17 @@ func (h *Handler) List(c *gin.Context) {
 	if q.ActiveOnly != nil {
 		activeOnly = *q.ActiveOnly
 	}
+	var ids []string
+	if raw := c.QueryArray("ids"); len(raw) > 0 {
+		parsed, err := bulk.ParseIDs(raw, bulk.MaxItems())
+		if err != nil {
+			response.Error(c, err)
+			return
+		}
+		ids = parsed
+	}
 	page, err := h.svc.List(c.Request.Context(), public.ListFilter{
-		Query: q.Q, CategoryID: q.CategoryID, CategorySlug: q.CategorySlug,
+		IDs: ids, Query: q.Q, CategoryID: q.CategoryID, CategorySlug: q.CategorySlug,
 		MinPriceCents: q.MinPriceCents, MaxPriceCents: q.MaxPriceCents,
 		InStock: q.InStock, Size: q.Size, MinRating: q.MinRating,
 		CreatedAfter: after, CreatedBefore: before, ActiveOnly: activeOnly,
@@ -146,6 +157,129 @@ func (h *Handler) GetBySlug(c *gin.Context) {
 		return
 	}
 	response.OK(c, d)
+}
+
+// BulkCreate godoc
+// @Summary Create products in bulk (admin)
+// @Description Per-item results in a 200 envelope. Duplicate generated slugs
+// @Description reject the whole request; a DB slug collision is per item.
+// @Description dryRun validates and projects the rows without writing.
+// @Tags admin
+// @Accept json
+// @Produce json
+// @Param Idempotency-Key header string false "Replay-safe request key (24h)"
+// @Param body body dto.BulkCreateProductsRequest true "Products"
+// @Success 200 {object} dto.BulkCreateProductsResponse
+// @Failure 400 {object} response.ErrorResponse
+// @Failure 401 {object} response.ErrorResponse
+// @Failure 403 {object} response.ErrorResponse
+// @Failure 409 {object} response.ErrorResponse
+// @Security BearerAuth
+// @Router /admin/products/bulk [post]
+func (h *Handler) BulkCreate(c *gin.Context) {
+	var req dto.BulkCreateProductsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, apperr.Validation("items is required"))
+		return
+	}
+	items := make([]public.CreateProductInput, 0, len(req.Items))
+	for _, in := range req.Items {
+		items = append(items, public.CreateProductInput{
+			CategoryID: in.CategoryID, Name: in.Name, Slug: in.Slug,
+			Description: in.Description, PriceCents: in.PriceCents,
+			Currency: in.Currency, ImageURL: in.ImageURL,
+		})
+	}
+	started := time.Now()
+	results, err := h.svc.BulkCreate(c.Request.Context(), items, req.Atomic, req.DryRun)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+	summary := bulk.Summary(results)
+	bulk.Log(c, "products.bulk_create", started, summary)
+	response.OK(c, dto.BulkCreateProductsResponse{Results: results, Summary: summary})
+}
+
+// BulkUpdate godoc
+// @Summary Update products in bulk (admin)
+// @Description One partial patch per product; slug stays immutable. An empty
+// @Description patch is a per-item validation error. Duplicate ids reject the
+// @Description whole request; dryRun projects without writing.
+// @Tags admin
+// @Accept json
+// @Produce json
+// @Param Idempotency-Key header string false "Replay-safe request key (24h)"
+// @Param body body dto.BulkUpdateProductsRequest true "Patches"
+// @Success 200 {object} dto.BulkUpdateProductsResponse
+// @Failure 400 {object} response.ErrorResponse
+// @Failure 401 {object} response.ErrorResponse
+// @Failure 403 {object} response.ErrorResponse
+// @Failure 409 {object} response.ErrorResponse
+// @Security BearerAuth
+// @Router /admin/products/bulk [patch]
+func (h *Handler) BulkUpdate(c *gin.Context) {
+	var req dto.BulkUpdateProductsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, apperr.Validation("updates is required"))
+		return
+	}
+	items := make([]public.BulkUpdateItem, 0, len(req.Updates))
+	for _, u := range req.Updates {
+		items = append(items, public.BulkUpdateItem{
+			ID: u.ID,
+			Patch: public.UpdateProductInput{
+				CategoryID: u.Patch.CategoryID, Name: u.Patch.Name,
+				Description: u.Patch.Description, PriceCents: u.Patch.PriceCents,
+				Currency: u.Patch.Currency, IsActive: u.Patch.IsActive,
+				ClearCategory: u.Patch.ClearCategory,
+			},
+		})
+	}
+	started := time.Now()
+	results, err := h.svc.BulkUpdate(c.Request.Context(), items, req.Atomic, req.DryRun)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+	summary := bulk.Summary(results)
+	bulk.Log(c, "products.bulk_update", started, summary)
+	response.OK(c, dto.BulkUpdateProductsResponse{Results: results, Summary: summary})
+}
+
+// BulkDelete godoc
+// @Summary Delete products in bulk (admin)
+// @Description Max 25 ids. Products referenced by order history are blocked
+// @Description per item (CONFLICT); variants, gallery, inventory, carts and
+// @Description wishlists cascade. dryRun reports wouldDelete and blockers
+// @Description without writing.
+// @Tags admin
+// @Accept json
+// @Produce json
+// @Param Idempotency-Key header string false "Replay-safe request key (24h)"
+// @Param body body dto.BulkDeleteProductsRequest true "Ids"
+// @Success 200 {object} dto.BulkDeleteProductsResponse
+// @Failure 400 {object} response.ErrorResponse
+// @Failure 401 {object} response.ErrorResponse
+// @Failure 403 {object} response.ErrorResponse
+// @Failure 409 {object} response.ErrorResponse
+// @Security BearerAuth
+// @Router /admin/products/bulk-delete [post]
+func (h *Handler) BulkDelete(c *gin.Context) {
+	var req dto.BulkDeleteProductsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, apperr.Validation("ids is required"))
+		return
+	}
+	started := time.Now()
+	results, err := h.svc.BulkDelete(c.Request.Context(), req.IDs, req.Atomic, req.DryRun)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+	summary := bulk.Summary(results)
+	bulk.Log(c, "products.bulk_delete", started, summary)
+	response.OK(c, dto.BulkDeleteProductsResponse{Results: results, Summary: summary})
 }
 
 // Create godoc
