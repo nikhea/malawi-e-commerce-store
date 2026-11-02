@@ -300,3 +300,173 @@ func (r *Postgres) SetImage(ctx context.Context, id, url, publicID string) (mode
 	}
 	return r.GetByID(ctx, id)
 }
+
+// imageColumns is the gallery projection shared by every query below.
+const imageColumns = `id, product_id, url, public_id, position, created_at`
+
+func scanImage(row pgx.Row) (model.Image, error) {
+	var i model.Image
+	err := row.Scan(&i.ID, &i.ProductID, &i.URL, &i.PublicID, &i.Position, &i.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return model.Image{}, apperr.NotFound("image not found")
+	}
+	if err != nil {
+		return model.Image{}, apperr.Internal(err)
+	}
+	return i, nil
+}
+
+// CreateImage appends a pending gallery row. Position is per-product:
+// MAX(position)+1, so inserts stay ordered without a separate lock.
+func (r *Postgres) CreateImage(ctx context.Context, productID string) (model.Image, error) {
+	const q = `INSERT INTO product_images (product_id, position)
+	           SELECT $1, COALESCE(MAX(position) + 1, 0)
+	           FROM product_images WHERE product_id = $1
+	           RETURNING ` + imageColumns
+	var img model.Image
+	err := r.pool.QueryRow(ctx, q, productID).Scan(
+		&img.ID, &img.ProductID, &img.URL, &img.PublicID, &img.Position, &img.CreatedAt)
+	if err != nil {
+		if pgCode(err) == "23503" {
+			return model.Image{}, apperr.NotFound("product not found")
+		}
+		return model.Image{}, apperr.Internal(err)
+	}
+	return img, nil
+}
+
+func (r *Postgres) ListImages(ctx context.Context, productID string) ([]model.Image, error) {
+	const q = `SELECT ` + imageColumns + `
+	           FROM product_images
+	           WHERE product_id = $1
+	           ORDER BY position ASC, created_at ASC, id ASC`
+	rows, err := r.pool.Query(ctx, q, productID)
+	if err != nil {
+		return nil, apperr.Internal(err)
+	}
+	defer rows.Close()
+	out := []model.Image{}
+	for rows.Next() {
+		img, err := scanImage(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, img)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, apperr.Internal(err)
+	}
+	return out, nil
+}
+
+func (r *Postgres) GetImage(ctx context.Context, productID, imageID string) (model.Image, error) {
+	const q = `SELECT ` + imageColumns + `
+	           FROM product_images WHERE product_id = $1 AND id = $2`
+	return scanImage(r.pool.QueryRow(ctx, q, productID, imageID))
+}
+
+// DeleteImage removes one row and, when it was the product's primary,
+// promotes the next ready gallery image (or clears the primary if none
+// remain). Both happen in one transaction so image_url never points at a
+// deleted row.
+func (r *Postgres) DeleteImage(ctx context.Context, productID, imageID string) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return apperr.Internal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var url, publicID string
+	err = tx.QueryRow(ctx,
+		`SELECT url, public_id FROM product_images
+		 WHERE product_id = $1 AND id = $2 FOR UPDATE`,
+		productID, imageID).Scan(&url, &publicID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return apperr.NotFound("image not found")
+	}
+	if err != nil {
+		return apperr.Internal(err)
+	}
+
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM product_images WHERE product_id = $1 AND id = $2`,
+		productID, imageID); err != nil {
+		return apperr.Internal(err)
+	}
+
+	// Only touch products when the deleted row was the current primary.
+	// public_id is the precise key; url covers legacy/empty-public-id data.
+	const promote = `UPDATE products p
+		SET image_url = COALESCE((
+			SELECT i.url FROM product_images i
+			WHERE i.product_id = p.id AND i.url <> ''
+			ORDER BY i.position, i.created_at, i.id LIMIT 1), ''),
+		    image_public_id = COALESCE((
+			SELECT i.public_id FROM product_images i
+			WHERE i.product_id = p.id AND i.url <> ''
+			ORDER BY i.position, i.created_at, i.id LIMIT 1), ''),
+		    updated_at = now()
+		WHERE p.id = $1
+		  AND (($3 <> '' AND p.image_public_id = $3) OR ($2 <> '' AND p.image_url = $2))`
+	if _, err := tx.Exec(ctx, promote, productID, url, publicID); err != nil {
+		return apperr.Internal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return apperr.Internal(err)
+	}
+	return nil
+}
+
+func (r *Postgres) SetPrimaryImage(ctx context.Context, productID, imageID string) (model.Product, error) {
+	const q = `UPDATE products p
+	           SET image_url = i.url, image_public_id = i.public_id, updated_at = now()
+	           FROM product_images i
+	           WHERE i.id = $2 AND i.product_id = $1 AND i.url <> ''
+	           RETURNING p.id`
+	var id string
+	err := r.pool.QueryRow(ctx, q, productID, imageID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return model.Product{}, apperr.NotFound("image not found")
+	}
+	if err != nil {
+		return model.Product{}, apperr.Internal(err)
+	}
+	return r.GetByID(ctx, productID)
+}
+
+// CompleteImage fills a pending row. A missing row means the admin deleted
+// it while the job was queued: return a zero image so the caller can stop
+// rather than letting River retry forever.
+func (r *Postgres) CompleteImage(ctx context.Context, imageID, url, publicID string) (model.Image, error) {
+	const q = `UPDATE product_images SET url = $2, public_id = $3
+	           WHERE id = $1
+	           RETURNING ` + imageColumns
+	img, err := scanImage(r.pool.QueryRow(ctx, q, imageID, url, publicID))
+	if err != nil {
+		if apperr.CodeOf(err) == apperr.CodeNotFound {
+			return model.Image{}, nil
+		}
+		return model.Image{}, err
+	}
+	return img, nil
+}
+
+// PromoteIfEmpty keeps the first gallery image as the product's primary
+// until an admin explicitly picks another one. The empty-image_url guard
+// makes concurrent upload completions idempotent.
+func (r *Postgres) PromoteIfEmpty(ctx context.Context, productID string) (bool, error) {
+	const q = `UPDATE products p
+		SET image_url = i.url, image_public_id = i.public_id, updated_at = now()
+		FROM (
+			SELECT url, public_id FROM product_images
+			WHERE product_id = $1 AND url <> ''
+			ORDER BY position, created_at, id
+			LIMIT 1
+		) i
+		WHERE p.id = $1 AND p.image_url = ''`
+	tag, err := r.pool.Exec(ctx, q, productID)
+	if err != nil {
+		return false, apperr.Internal(err)
+	}
+	return tag.RowsAffected() > 0, nil
+}

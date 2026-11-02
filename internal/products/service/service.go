@@ -24,6 +24,18 @@ type Repository interface {
 	Update(ctx context.Context, p model.Product) (model.Product, error)
 	Delete(ctx context.Context, id string) error
 	SetImage(ctx context.Context, id, url, publicID string) (model.Product, error)
+
+	CreateImage(ctx context.Context, productID string) (model.Image, error)
+	ListImages(ctx context.Context, productID string) ([]model.Image, error)
+	GetImage(ctx context.Context, productID, imageID string) (model.Image, error)
+	DeleteImage(ctx context.Context, productID, imageID string) error
+	SetPrimaryImage(ctx context.Context, productID, imageID string) (model.Product, error)
+	// CompleteImage returns a zero ProductID when the row no longer exists
+	// (admin deleted it while the upload was queued).
+	CompleteImage(ctx context.Context, imageID, url, publicID string) (model.Image, error)
+	// PromoteIfEmpty makes the lowest-position ready image the primary
+	// when the product has none yet. Reports whether it changed anything.
+	PromoteIfEmpty(ctx context.Context, productID string) (bool, error)
 }
 
 type service struct {
@@ -45,7 +57,7 @@ func toPublic(p model.Product) public.Product {
 	}
 }
 
-func toDetail(p model.Product, variants []variantspublic.Variant) public.Detail {
+func toDetail(p model.Product, variants []variantspublic.Variant, images []model.Image) public.Detail {
 	views := make([]public.VariantView, 0, len(variants))
 	for _, v := range variants {
 		views = append(views, public.VariantView{
@@ -54,7 +66,30 @@ func toDetail(p model.Product, variants []variantspublic.Variant) public.Detail 
 			Available: v.Available, InStock: v.InStock,
 		})
 	}
-	return public.Detail{Product: toPublic(p), Variants: views}
+	gallery := make([]public.Image, 0, len(images))
+	for _, img := range images {
+		if img.URL == "" {
+			continue // still queued in the media pipeline
+		}
+		gallery = append(gallery, toPublicImage(img, p))
+	}
+	return public.Detail{Product: toPublic(p), Variants: views, Images: gallery}
+}
+
+// toPublicImage marks the row whose URL/public id matches the product's
+// legacy primary image. Public-id comparison wins; URL is the fallback for
+// images uploaded before the gallery existed.
+func toPublicImage(img model.Image, p model.Product) public.Image {
+	primary := false
+	if p.ImagePublicID != "" {
+		primary = img.PublicID == p.ImagePublicID
+	} else {
+		primary = img.URL != "" && img.URL == p.ImageURL
+	}
+	return public.Image{
+		ID: img.ID, URL: img.URL, Position: img.Position,
+		IsPrimary: primary, CreatedAt: img.CreatedAt,
+	}
 }
 
 func (s *service) detail(ctx context.Context, p model.Product) (public.Detail, error) {
@@ -62,7 +97,11 @@ func (s *service) detail(ctx context.Context, p model.Product) (public.Detail, e
 	if err != nil {
 		return public.Detail{}, err
 	}
-	return toDetail(p, variants), nil
+	images, err := s.repo.ListImages(ctx, p.ID)
+	if err != nil {
+		return public.Detail{}, err
+	}
+	return toDetail(p, variants, images), nil
 }
 
 func (s *service) Create(ctx context.Context, in public.CreateProductInput) (public.Product, error) {
@@ -293,4 +332,97 @@ func (s *service) SetImage(ctx context.Context, id, url, publicID string) (publi
 		return public.Product{}, err
 	}
 	return toPublic(p), nil
+}
+
+// AddImage reserves a gallery slot before the bytes are uploaded. The row
+// stays pending (empty url) until the media job's completion callback runs.
+func (s *service) AddImage(ctx context.Context, productID string) (public.Image, error) {
+	productID = strings.TrimSpace(productID)
+	if productID == "" {
+		return public.Image{}, apperr.Validation("id is required")
+	}
+	p, err := s.repo.GetByID(ctx, productID)
+	if err != nil {
+		return public.Image{}, err
+	}
+	img, err := s.repo.CreateImage(ctx, productID)
+	if err != nil {
+		return public.Image{}, err
+	}
+	return toPublicImage(img, p), nil
+}
+
+// ListImages is the admin view: pending rows are included, so an operator
+// can see uploads that are still queued.
+func (s *service) ListImages(ctx context.Context, productID string) ([]public.Image, error) {
+	productID = strings.TrimSpace(productID)
+	if productID == "" {
+		return nil, apperr.Validation("id is required")
+	}
+	p, err := s.repo.GetByID(ctx, productID)
+	if err != nil {
+		return nil, err
+	}
+	images, err := s.repo.ListImages(ctx, productID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]public.Image, 0, len(images))
+	for _, img := range images {
+		out = append(out, toPublicImage(img, p))
+	}
+	return out, nil
+}
+
+func (s *service) DeleteImage(ctx context.Context, productID, imageID string) error {
+	productID = strings.TrimSpace(productID)
+	imageID = strings.TrimSpace(imageID)
+	if productID == "" || imageID == "" {
+		return apperr.Validation("id and image id are required")
+	}
+	return s.repo.DeleteImage(ctx, productID, imageID)
+}
+
+// SetPrimaryImage points the product's legacy image_url at one gallery row.
+// Pending rows are rejected: there is no URL to promote yet.
+func (s *service) SetPrimaryImage(ctx context.Context, productID, imageID string) (public.Product, error) {
+	productID = strings.TrimSpace(productID)
+	imageID = strings.TrimSpace(imageID)
+	if productID == "" || imageID == "" {
+		return public.Product{}, apperr.Validation("id and image id are required")
+	}
+	img, err := s.repo.GetImage(ctx, productID, imageID)
+	if err != nil {
+		return public.Product{}, err
+	}
+	if strings.TrimSpace(img.URL) == "" {
+		return public.Product{}, apperr.Validation("image upload is not finished yet")
+	}
+	p, err := s.repo.SetPrimaryImage(ctx, productID, imageID)
+	if err != nil {
+		return public.Product{}, err
+	}
+	return toPublic(p), nil
+}
+
+// CompleteImage is the media pipeline callback. A row the admin deleted
+// while the job was queued is a no-op (not a retryable error).
+func (s *service) CompleteImage(ctx context.Context, imageID, url, publicID string) error {
+	imageID = strings.TrimSpace(imageID)
+	url = strings.TrimSpace(url)
+	if imageID == "" {
+		return apperr.Validation("image id is required")
+	}
+	if url == "" {
+		return apperr.Validation("image url is required")
+	}
+	img, err := s.repo.CompleteImage(ctx, imageID, url, strings.TrimSpace(publicID))
+	if err != nil {
+		return err
+	}
+	if img.ProductID == "" {
+		return nil // gallery row is gone
+	}
+	_, err = s.repo.PromoteIfEmpty(ctx, img.ProductID)
+	return err
 }

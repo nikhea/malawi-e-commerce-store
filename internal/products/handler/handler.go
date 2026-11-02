@@ -2,6 +2,7 @@ package handler
 
 import (
 	"io"
+	"mime/multipart"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,10 @@ import (
 
 // maxImageBytes caps a single upload at 10 MiB (mirrors the worker cap).
 const maxImageBytes = 10 << 20
+
+// maxImagesPerRequest keeps one multipart request from queueing an
+// unbounded amount of work (and temp files).
+const maxImagesPerRequest = 20
 
 // Handler is thin: bind input, call the service, write the envelope.
 type Handler struct {
@@ -287,4 +292,205 @@ func (h *Handler) UploadImage(c *gin.Context) {
 		return
 	}
 	response.Accepted(c, gin.H{"status": "queued"})
+}
+
+// ListImages godoc
+// @Summary List a product's gallery images (admin)
+// @Description Includes rows whose upload is still queued (empty url).
+// @Tags admin
+// @Produce json
+// @Param id path string true "Product ID"
+// @Success 200 {object} public.ImageListResponse
+// @Failure 400 {object} response.ErrorResponse
+// @Failure 401 {object} response.ErrorResponse
+// @Failure 403 {object} response.ErrorResponse
+// @Failure 404 {object} response.ErrorResponse
+// @Security BearerAuth
+// @Router /admin/products/{id}/images [get]
+func (h *Handler) ListImages(c *gin.Context) {
+	images, err := h.svc.ListImages(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+	response.OK(c, public.ImageListResponse{Images: images})
+}
+
+// UploadImages godoc
+// @Summary Upload product gallery images (admin)
+// @Description Multipart with repeated files (field "files"; "file" is also accepted). Each file becomes one River job, so the response returns before Cloudinary finishes. The gallery fills in as uploads complete; when the product has no primary image, the first ready image is promoted to image_url automatically.
+// @Tags admin
+// @Accept multipart/form-data
+// @Produce json
+// @Param id path string true "Product ID"
+// @Param files formData file true "Images (max 10 MiB each, up to 20 per request)"
+// @Success 202 {object} dto.UploadImagesResponse
+// @Failure 400 {object} response.ErrorResponse
+// @Failure 401 {object} response.ErrorResponse
+// @Failure 403 {object} response.ErrorResponse
+// @Failure 404 {object} response.ErrorResponse
+// @Security BearerAuth
+// @Router /admin/products/{id}/images [post]
+func (h *Handler) UploadImages(c *gin.Context) {
+	ctx := c.Request.Context()
+	productID := c.Param("id")
+	if _, err := h.svc.GetByID(ctx, productID); err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	if err := c.Request.ParseMultipartForm(32 << 20); err != nil {
+		response.Error(c, apperr.Validation("multipart form with image files is required"))
+		return
+	}
+	form := c.Request.MultipartForm
+	if form == nil {
+		response.Error(c, apperr.Validation("multipart form with image files is required"))
+		return
+	}
+	defer form.RemoveAll()
+
+	headers := form.File["files"]
+	if len(headers) == 0 {
+		headers = form.File["file"]
+	}
+	if len(headers) == 0 {
+		response.Error(c, apperr.Validation("at least one image file is required"))
+		return
+	}
+	if len(headers) > maxImagesPerRequest {
+		response.Error(c, apperr.Validation("at most 20 images per request"))
+		return
+	}
+
+	queued, failed := 0, 0
+	var firstErr error
+	for _, header := range headers {
+		if header.Size > maxImageBytes {
+			failed++
+			if firstErr == nil {
+				firstErr = apperr.Validation("image exceeds 10 MiB")
+			}
+			continue
+		}
+
+		img, err := h.svc.AddImage(ctx, productID)
+		if err != nil {
+			// Product vanished or the DB failed: stop queueing more, but
+			// keep the jobs already accepted.
+			if firstErr == nil {
+				firstErr = err
+			}
+			break
+		}
+
+		tmpPath, err := saveUpload(header)
+		if err != nil {
+			_ = h.svc.DeleteImage(ctx, productID, img.ID)
+			failed++
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+
+		if err := h.media.Enqueue(ctx, mediapublic.EnqueueInput{
+			OwnerType: mediapublic.OwnerProductImage,
+			OwnerID:   img.ID,
+			Filename:  header.Filename,
+			Folder:    "malawi-store/products",
+			TempPath:  tmpPath,
+		}); err != nil {
+			os.Remove(tmpPath)
+			_ = h.svc.DeleteImage(ctx, productID, img.ID)
+			failed++
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		queued++
+	}
+
+	if queued == 0 {
+		if firstErr == nil {
+			firstErr = apperr.Validation("no images could be queued")
+		}
+		response.Error(c, firstErr)
+		return
+	}
+	response.Accepted(c, dto.UploadImagesResponse{
+		Status: "queued", Queued: queued, Failed: failed,
+	})
+}
+
+// saveUpload copies one multipart file into a temp file the River worker
+// owns (and deletes after upload).
+func saveUpload(header *multipart.FileHeader) (string, error) {
+	src, err := header.Open()
+	if err != nil {
+		return "", apperr.Internal(err)
+	}
+	defer src.Close()
+
+	tmp, err := os.CreateTemp("", "prodimg-*"+filepath.Ext(header.Filename))
+	if err != nil {
+		return "", apperr.Internal(err)
+	}
+	tmpPath := tmp.Name()
+	if _, err := io.Copy(tmp, src); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return "", apperr.Internal(err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return "", apperr.Internal(err)
+	}
+	return tmpPath, nil
+}
+
+// DeleteImage godoc
+// @Summary Delete a product gallery image (admin)
+// @Description If the row was the product's primary image, the next ready image is promoted; with no images left, image_url is cleared.
+// @Tags admin
+// @Produce json
+// @Param id path string true "Product ID"
+// @Param imageId path string true "Image ID"
+// @Success 204
+// @Failure 400 {object} response.ErrorResponse
+// @Failure 401 {object} response.ErrorResponse
+// @Failure 403 {object} response.ErrorResponse
+// @Failure 404 {object} response.ErrorResponse
+// @Security BearerAuth
+// @Router /admin/products/{id}/images/{imageId} [delete]
+func (h *Handler) DeleteImage(c *gin.Context) {
+	if err := h.svc.DeleteImage(c.Request.Context(), c.Param("id"), c.Param("imageId")); err != nil {
+		response.Error(c, err)
+		return
+	}
+	response.NoContent(c)
+}
+
+// SetPrimaryImage godoc
+// @Summary Set a product's primary image (admin)
+// @Description Points products.image_url (the storefront primary) at one gallery row. Pending uploads are rejected.
+// @Tags admin
+// @Produce json
+// @Param id path string true "Product ID"
+// @Param imageId path string true "Image ID"
+// @Success 200 {object} public.Product
+// @Failure 400 {object} response.ErrorResponse
+// @Failure 401 {object} response.ErrorResponse
+// @Failure 403 {object} response.ErrorResponse
+// @Failure 404 {object} response.ErrorResponse
+// @Security BearerAuth
+// @Router /admin/products/{id}/images/{imageId}/primary [put]
+func (h *Handler) SetPrimaryImage(c *gin.Context) {
+	p, err := h.svc.SetPrimaryImage(c.Request.Context(), c.Param("id"), c.Param("imageId"))
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+	response.OK(c, p)
 }

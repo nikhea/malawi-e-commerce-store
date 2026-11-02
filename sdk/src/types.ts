@@ -226,8 +226,29 @@ export type VariantView = {
   in_stock: boolean;
 };
 
+/** One gallery image. `is_primary` mirrors the product's `image_url`. */
+export type ProductImage = {
+  id: string;
+  url: string;
+  position: number;
+  is_primary: boolean;
+  created_at: string;
+};
+
 /** Returned by GET /products/:id and GET /products/slug/:slug. */
-export type ProductDetail = { product: Product; variants: VariantView[] };
+export type ProductDetail = {
+  product: Product;
+  variants: VariantView[];
+  /** Uploads still queued are excluded. */
+  images: ProductImage[];
+};
+
+/** 202 response from the admin multi-file upload. */
+export type UploadImagesResult = {
+  status: string;
+  queued: number;
+  failed: number;
+};
 
 export type CreateProductInput = {
   category_id?: string | null;

@@ -155,6 +155,10 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 			_, err := productsSvc.SetImage(ctx, ownerID, url, publicID)
 			return err
 		})
+	mediaSvc.RegisterComplete(mediapublic.OwnerProductImage,
+		func(ctx context.Context, ownerID, url, publicID string) error {
+			return productsSvc.CompleteImage(ctx, ownerID, url, publicID)
+		})
 	if err := riverClient.Start(ctx); err != nil {
 		return nil, fmt.Errorf("river start: %w", err)
 	}

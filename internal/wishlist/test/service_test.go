@@ -90,6 +90,17 @@ func (f fakeProducts) Delete(context.Context, string) error { return nil }
 func (f fakeProducts) SetImage(context.Context, string, string, string) (productspublic.Product, error) {
 	return productspublic.Product{}, nil
 }
+func (f fakeProducts) AddImage(context.Context, string) (productspublic.Image, error) {
+	return productspublic.Image{}, nil
+}
+func (f fakeProducts) ListImages(context.Context, string) ([]productspublic.Image, error) {
+	return nil, nil
+}
+func (f fakeProducts) DeleteImage(context.Context, string, string) error { return nil }
+func (f fakeProducts) SetPrimaryImage(context.Context, string, string) (productspublic.Product, error) {
+	return productspublic.Product{}, nil
+}
+func (f fakeProducts) CompleteImage(context.Context, string, string, string) error { return nil }
 
 // fakeUsers knows "u1" only.
 type fakeUsers struct{}

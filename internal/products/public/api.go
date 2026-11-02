@@ -40,10 +40,28 @@ type VariantView struct {
 	InStock    bool   `json:"in_stock" example:"true"`
 }
 
-// Detail is the storefront product page: product + its SKUs.
+// Image is one product gallery image. IsPrimary mirrors the product's
+// legacy ImageURL field, which stays the canonical primary image.
+type Image struct {
+	ID        string    `json:"id" example:"3fa85f64-5717-4562-b3fc-2c963f66afa6"`
+	URL       string    `json:"url" example:"https://res.cloudinary.com/…/tunic.jpg"`
+	Position  int       `json:"position" example:"0"`
+	IsPrimary bool      `json:"is_primary" example:"true"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// ImageListResponse is the documented shape for the admin gallery list:
+// an "images" array (mirrors Detail's field name).
+type ImageListResponse struct {
+	Images []Image `json:"images"`
+}
+
+// Detail is the storefront product page: product + its SKUs + gallery.
 type Detail struct {
 	Product  Product       `json:"product"`
 	Variants []VariantView `json:"variants"`
+	// Images excludes uploads that are still queued (empty url).
+	Images []Image `json:"images"`
 }
 
 // CreateProductInput carries a new SPU. CategoryID nil = unfiled.
@@ -124,4 +142,14 @@ type Service interface {
 	Update(ctx context.Context, id string, in UpdateProductInput) (Product, error)
 	Delete(ctx context.Context, id string) error
 	SetImage(ctx context.Context, id, url, publicID string) (Product, error)
+
+	// Gallery. AddImage creates an empty (pending) row; the handler then
+	// enqueues one media job per row. CompleteImage fills the row and
+	// promotes the lowest-position ready image when the product has no
+	// primary yet.
+	AddImage(ctx context.Context, productID string) (Image, error)
+	ListImages(ctx context.Context, productID string) ([]Image, error)
+	DeleteImage(ctx context.Context, productID, imageID string) error
+	SetPrimaryImage(ctx context.Context, productID, imageID string) (Product, error)
+	CompleteImage(ctx context.Context, imageID, url, publicID string) error
 }
