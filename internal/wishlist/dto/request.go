@@ -2,7 +2,7 @@ package dto
 
 import (
 	"github.com/nikhea/malawi-e-commerce-store/internal/wishlist/public"
-	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/bulk"
 )
 
 // AddWishlistRequest is the POST /wishlist body.
@@ -26,9 +26,69 @@ type BulkRemoveWishlistRequest struct {
 	Atomic bool     `json:"atomic"`
 }
 
-// Named response types keep swag happy.
-type BulkAddWishlistResponse bulkdto.BulkResponse[public.Item]
-type BulkRemoveWishlistResponse bulkdto.BulkResponse[bulkdto.Empty]
+// BulkWishlistResult is one heart outcome. Declared concretely because swag
+// cannot render generic instantiations.
+type BulkWishlistResult struct {
+	Index          int                 `json:"index" example:"0"`
+	ID             string              `json:"id,omitempty"`
+	Status         string              `json:"status" example:"ok"`
+	Data           *public.Item        `json:"data,omitempty"`
+	Error          *bulk.BulkItemError `json:"error,omitempty"`
+	AlreadyExists  bool                `json:"alreadyExists,omitempty"`
+	AlreadyRemoved bool                `json:"alreadyRemoved,omitempty"`
+	WouldDelete    bool                `json:"wouldDelete,omitempty"`
+	Blockers       []string            `json:"blockers,omitempty"`
+}
+
+// BulkWishlistDeleteResult is the unheart outcome (no entity payload).
+type BulkWishlistDeleteResult struct {
+	Index          int                 `json:"index" example:"0"`
+	ID             string              `json:"id,omitempty"`
+	Status         string              `json:"status" example:"ok"`
+	Error          *bulk.BulkItemError `json:"error,omitempty"`
+	AlreadyRemoved bool                `json:"alreadyRemoved,omitempty"`
+	WouldDelete    bool                `json:"wouldDelete,omitempty"`
+	Blockers       []string            `json:"blockers,omitempty"`
+}
+
+// Documented bulk response shapes.
+type BulkAddWishlistResponse struct {
+	Results []BulkWishlistResult `json:"results"`
+	Summary bulk.BulkSummary     `json:"summary"`
+}
+
+type BulkRemoveWishlistResponse struct {
+	Results []BulkWishlistDeleteResult `json:"results"`
+	Summary bulk.BulkSummary           `json:"summary"`
+}
+
+// NewBulkAddWishlistResponse projects heart results onto the documented
+// shape.
+func NewBulkAddWishlistResponse(results []bulk.BulkResult[public.Item], summary bulk.BulkSummary) BulkAddWishlistResponse {
+	out := make([]BulkWishlistResult, len(results))
+	for i, r := range results {
+		out[i] = BulkWishlistResult{
+			Index: r.Index, ID: r.ID, Status: r.Status, Data: r.Data, Error: r.Error,
+			AlreadyExists: r.AlreadyExists, AlreadyRemoved: r.AlreadyRemoved,
+			WouldDelete: r.WouldDelete, Blockers: r.Blockers,
+		}
+	}
+	return BulkAddWishlistResponse{Results: out, Summary: summary}
+}
+
+// NewBulkRemoveWishlistResponse projects unheart results onto the
+// documented shape.
+func NewBulkRemoveWishlistResponse(results []bulk.BulkResult[bulk.Empty], summary bulk.BulkSummary) BulkRemoveWishlistResponse {
+	out := make([]BulkWishlistDeleteResult, len(results))
+	for i, r := range results {
+		out[i] = BulkWishlistDeleteResult{
+			Index: r.Index, ID: r.ID, Status: r.Status, Error: r.Error,
+			AlreadyRemoved: r.AlreadyRemoved, WouldDelete: r.WouldDelete,
+			Blockers: r.Blockers,
+		}
+	}
+	return BulkRemoveWishlistResponse{Results: out, Summary: summary}
+}
 
 // ListWishlistQuery binds GET /wishlist paging and catalog filters.
 type ListWishlistQuery struct {

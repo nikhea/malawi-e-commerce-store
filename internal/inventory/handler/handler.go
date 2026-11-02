@@ -145,7 +145,7 @@ func (h *Handler) BulkSetStock(c *gin.Context) {
 	}
 	summary := bulk.Summary(results)
 	bulk.Log(c, "inventory.stock.bulk", started, summary)
-	response.OK(c, dto.BulkSetStockResponse{Results: results, Summary: summary})
+	response.OK(c, dto.NewBulkSetStockResponse(results, summary))
 }
 
 // Reserve godoc

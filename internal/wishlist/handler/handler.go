@@ -131,7 +131,7 @@ func (h *Handler) BulkAdd(c *gin.Context) {
 	}
 	summary := bulk.Summary(results)
 	bulk.Log(c, "wishlist.bulk_add", started, summary)
-	response.OK(c, dto.BulkAddWishlistResponse{Results: results, Summary: summary})
+	response.OK(c, dto.NewBulkAddWishlistResponse(results, summary))
 }
 
 // BulkRemove godoc
@@ -166,5 +166,5 @@ func (h *Handler) BulkRemove(c *gin.Context) {
 	}
 	summary := bulk.Summary(results)
 	bulk.Log(c, "wishlist.bulk_remove", started, summary)
-	response.OK(c, dto.BulkRemoveWishlistResponse{Results: results, Summary: summary})
+	response.OK(c, dto.NewBulkRemoveWishlistResponse(results, summary))
 }

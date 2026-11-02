@@ -6,7 +6,6 @@ import (
 
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/bulk"
-	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
 )
 
 func TestCheckCount(t *testing.T) {
@@ -74,7 +73,7 @@ func TestFindDuplicateAndLineKey(t *testing.T) {
 
 func TestResultsHelpers(t *testing.T) {
 	variant := "v1"
-	results := []bulkdto.BulkResult[string]{
+	results := []bulk.BulkResult[string]{
 		bulk.OK(0, "p1", "done"),
 		bulk.Failed[string](1, "v1", apperr.NotFound("variant not found")),
 	}

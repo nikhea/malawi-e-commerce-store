@@ -2,7 +2,7 @@ package dto
 
 import (
 	"github.com/nikhea/malawi-e-commerce-store/internal/inventory/public"
-	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/bulk"
 )
 
 // SetStockRequest is the POST /admin/inventory/stock body.
@@ -26,8 +26,39 @@ type BulkSetStockRequest struct {
 	Items  []BulkSetStockItem `json:"items" binding:"required"`
 }
 
+// BulkSetStockResult is one stock line outcome. Declared concretely because
+// swag cannot render generic instantiations.
+type BulkSetStockResult struct {
+	Index          int                 `json:"index" example:"0"`
+	ID             string              `json:"id,omitempty"`
+	Status         string              `json:"status" example:"ok"`
+	Data           *public.Stock       `json:"data,omitempty"`
+	Error          *bulk.BulkItemError `json:"error,omitempty"`
+	AlreadyExists  bool                `json:"alreadyExists,omitempty"`
+	AlreadyRemoved bool                `json:"alreadyRemoved,omitempty"`
+	WouldDelete    bool                `json:"wouldDelete,omitempty"`
+	Blockers       []string            `json:"blockers,omitempty"`
+}
+
 // BulkSetStockResponse is the documented bulk restock response.
-type BulkSetStockResponse bulkdto.BulkResponse[public.Stock]
+type BulkSetStockResponse struct {
+	Results []BulkSetStockResult `json:"results"`
+	Summary bulk.BulkSummary     `json:"summary"`
+}
+
+// NewBulkSetStockResponse projects the service results onto the documented
+// response shape.
+func NewBulkSetStockResponse(results []bulk.BulkResult[public.Stock], summary bulk.BulkSummary) BulkSetStockResponse {
+	out := make([]BulkSetStockResult, len(results))
+	for i, r := range results {
+		out[i] = BulkSetStockResult{
+			Index: r.Index, ID: r.ID, Status: r.Status, Data: r.Data, Error: r.Error,
+			AlreadyExists: r.AlreadyExists, AlreadyRemoved: r.AlreadyRemoved,
+			WouldDelete: r.WouldDelete, Blockers: r.Blockers,
+		}
+	}
+	return BulkSetStockResponse{Results: out, Summary: summary}
+}
 
 // BulkStockResponse is the variantIds read: availability rows plus the ids
 // that did not resolve to a variant.

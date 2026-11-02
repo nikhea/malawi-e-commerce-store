@@ -198,7 +198,7 @@ func (h *Handler) BulkCreate(c *gin.Context) {
 	}
 	summary := bulk.Summary(results)
 	bulk.Log(c, "products.bulk_create", started, summary)
-	response.OK(c, dto.BulkCreateProductsResponse{Results: results, Summary: summary})
+	response.OK(c, dto.NewBulkProductResponse(results, summary))
 }
 
 // BulkUpdate godoc
@@ -244,7 +244,7 @@ func (h *Handler) BulkUpdate(c *gin.Context) {
 	}
 	summary := bulk.Summary(results)
 	bulk.Log(c, "products.bulk_update", started, summary)
-	response.OK(c, dto.BulkUpdateProductsResponse{Results: results, Summary: summary})
+	response.OK(c, dto.NewBulkProductResponse(results, summary))
 }
 
 // BulkDelete godoc
@@ -279,7 +279,7 @@ func (h *Handler) BulkDelete(c *gin.Context) {
 	}
 	summary := bulk.Summary(results)
 	bulk.Log(c, "products.bulk_delete", started, summary)
-	response.OK(c, dto.BulkDeleteProductsResponse{Results: results, Summary: summary})
+	response.OK(c, dto.NewBulkDeleteResponse(results, summary))
 }
 
 // Create godoc

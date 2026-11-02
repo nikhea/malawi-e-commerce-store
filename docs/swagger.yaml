@@ -9,6 +9,9 @@ definitions:
     - CONFLICT
     - RATE_LIMITED
     - INTERNAL
+    - BULK_LIMIT_EXCEEDED
+    - DUPLICATE_ITEM
+    - IDEMPOTENCY_CONFLICT
     type: string
     x-enum-varnames:
     - CodeNotFound
@@ -18,6 +21,31 @@ definitions:
     - CodeConflict
     - CodeRateLimited
     - CodeInternal
+    - CodeBulkLimitExceeded
+    - CodeDuplicateItem
+    - CodeIdempotencyConflict
+  bulk.BulkItemError:
+    properties:
+      code:
+        allOf:
+        - $ref: '#/definitions/apperr.Code'
+        example: NOT_FOUND
+      message:
+        example: product not found
+        type: string
+    type: object
+  bulk.BulkSummary:
+    properties:
+      failed:
+        example: 1
+        type: integer
+      succeeded:
+        example: 1
+        type: integer
+      total:
+        example: 2
+        type: integer
+    type: object
   dto.AddItemRequest:
     properties:
       product_id:
@@ -38,6 +66,413 @@ definitions:
         type: string
     required:
     - product_id
+    type: object
+  dto.BulkAddCartResponse:
+    properties:
+      cart:
+        $ref: '#/definitions/public.Cart'
+      results:
+        items:
+          $ref: '#/definitions/dto.BulkAddResult'
+        type: array
+      summary:
+        $ref: '#/definitions/bulk.BulkSummary'
+    type: object
+  dto.BulkAddItemsRequest:
+    properties:
+      atomic:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/dto.AddItemRequest'
+        type: array
+    required:
+    - items
+    type: object
+  dto.BulkAddResult:
+    properties:
+      alreadyExists:
+        type: boolean
+      alreadyRemoved:
+        type: boolean
+      blockers:
+        items:
+          type: string
+        type: array
+      data:
+        $ref: '#/definitions/public.Line'
+      error:
+        $ref: '#/definitions/bulk.BulkItemError'
+      id:
+        type: string
+      index:
+        example: 0
+        type: integer
+      status:
+        example: ok
+        type: string
+      wouldDelete:
+        type: boolean
+    type: object
+  dto.BulkAddWishlistRequest:
+    properties:
+      atomic:
+        type: boolean
+      productIds:
+        items:
+          type: string
+        type: array
+    required:
+    - productIds
+    type: object
+  dto.BulkAddWishlistResponse:
+    properties:
+      results:
+        items:
+          $ref: '#/definitions/dto.BulkWishlistResult'
+        type: array
+      summary:
+        $ref: '#/definitions/bulk.BulkSummary'
+    type: object
+  dto.BulkCreateProductsRequest:
+    properties:
+      atomic:
+        type: boolean
+      dryRun:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/dto.CreateProductRequest'
+        type: array
+    required:
+    - items
+    type: object
+  dto.BulkCreateProductsResponse:
+    properties:
+      results:
+        items:
+          $ref: '#/definitions/dto.BulkProductResult'
+        type: array
+      summary:
+        $ref: '#/definitions/bulk.BulkSummary'
+    type: object
+  dto.BulkCreateVariantsRequest:
+    properties:
+      atomic:
+        type: boolean
+      dryRun:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/dto.CreateVariantRequest'
+        type: array
+    required:
+    - items
+    type: object
+  dto.BulkCreateVariantsResponse:
+    properties:
+      results:
+        items:
+          $ref: '#/definitions/dto.BulkVariantResult'
+        type: array
+      summary:
+        $ref: '#/definitions/bulk.BulkSummary'
+    type: object
+  dto.BulkDeleteProductsRequest:
+    properties:
+      atomic:
+        type: boolean
+      dryRun:
+        type: boolean
+      ids:
+        items:
+          type: string
+        type: array
+    required:
+    - ids
+    type: object
+  dto.BulkDeleteProductsResponse:
+    properties:
+      results:
+        items:
+          $ref: '#/definitions/dto.BulkDeleteResult'
+        type: array
+      summary:
+        $ref: '#/definitions/bulk.BulkSummary'
+    type: object
+  dto.BulkDeleteResult:
+    properties:
+      alreadyRemoved:
+        type: boolean
+      blockers:
+        items:
+          type: string
+        type: array
+      error:
+        $ref: '#/definitions/bulk.BulkItemError'
+      id:
+        type: string
+      index:
+        example: 0
+        type: integer
+      status:
+        example: ok
+        type: string
+      wouldDelete:
+        type: boolean
+    type: object
+  dto.BulkProductResult:
+    properties:
+      alreadyExists:
+        type: boolean
+      alreadyRemoved:
+        type: boolean
+      blockers:
+        items:
+          type: string
+        type: array
+      data:
+        $ref: '#/definitions/public.Product'
+      error:
+        $ref: '#/definitions/bulk.BulkItemError'
+      id:
+        type: string
+      index:
+        example: 0
+        type: integer
+      status:
+        example: ok
+        type: string
+      wouldDelete:
+        type: boolean
+    type: object
+  dto.BulkRemoveWishlistRequest:
+    properties:
+      atomic:
+        type: boolean
+      dryRun:
+        type: boolean
+      ids:
+        items:
+          type: string
+        type: array
+    required:
+    - ids
+    type: object
+  dto.BulkRemoveWishlistResponse:
+    properties:
+      results:
+        items:
+          $ref: '#/definitions/dto.BulkWishlistDeleteResult'
+        type: array
+      summary:
+        $ref: '#/definitions/bulk.BulkSummary'
+    type: object
+  dto.BulkSetStockItem:
+    properties:
+      product_id:
+        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+        type: string
+      qty:
+        example: 120
+        type: integer
+      variant_id:
+        type: string
+    required:
+    - product_id
+    type: object
+  dto.BulkSetStockRequest:
+    properties:
+      atomic:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/dto.BulkSetStockItem'
+        type: array
+    required:
+    - items
+    type: object
+  dto.BulkSetStockResponse:
+    properties:
+      results:
+        items:
+          $ref: '#/definitions/dto.BulkSetStockResult'
+        type: array
+      summary:
+        $ref: '#/definitions/bulk.BulkSummary'
+    type: object
+  dto.BulkSetStockResult:
+    properties:
+      alreadyExists:
+        type: boolean
+      alreadyRemoved:
+        type: boolean
+      blockers:
+        items:
+          type: string
+        type: array
+      data:
+        $ref: '#/definitions/public.Stock'
+      error:
+        $ref: '#/definitions/bulk.BulkItemError'
+      id:
+        type: string
+      index:
+        example: 0
+        type: integer
+      status:
+        example: ok
+        type: string
+      wouldDelete:
+        type: boolean
+    type: object
+  dto.BulkStockResponse:
+    properties:
+      notFound:
+        items:
+          type: string
+        type: array
+      stock:
+        items:
+          $ref: '#/definitions/public.Stock'
+        type: array
+    type: object
+  dto.BulkUpdateProductItem:
+    properties:
+      id:
+        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+        type: string
+      patch:
+        $ref: '#/definitions/dto.UpdateProductRequest'
+    required:
+    - id
+    - patch
+    type: object
+  dto.BulkUpdateProductsRequest:
+    properties:
+      atomic:
+        type: boolean
+      dryRun:
+        type: boolean
+      updates:
+        items:
+          $ref: '#/definitions/dto.BulkUpdateProductItem'
+        type: array
+    required:
+    - updates
+    type: object
+  dto.BulkUpdateProductsResponse:
+    properties:
+      results:
+        items:
+          $ref: '#/definitions/dto.BulkProductResult'
+        type: array
+      summary:
+        $ref: '#/definitions/bulk.BulkSummary'
+    type: object
+  dto.BulkUpdateVariantItem:
+    properties:
+      id:
+        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+        type: string
+      patch:
+        $ref: '#/definitions/dto.UpdateVariantRequest'
+    required:
+    - id
+    - patch
+    type: object
+  dto.BulkUpdateVariantsRequest:
+    properties:
+      atomic:
+        type: boolean
+      dryRun:
+        type: boolean
+      updates:
+        items:
+          $ref: '#/definitions/dto.BulkUpdateVariantItem'
+        type: array
+    required:
+    - updates
+    type: object
+  dto.BulkUpdateVariantsResponse:
+    properties:
+      results:
+        items:
+          $ref: '#/definitions/dto.BulkVariantResult'
+        type: array
+      summary:
+        $ref: '#/definitions/bulk.BulkSummary'
+    type: object
+  dto.BulkVariantResult:
+    properties:
+      alreadyExists:
+        type: boolean
+      alreadyRemoved:
+        type: boolean
+      blockers:
+        items:
+          type: string
+        type: array
+      data:
+        $ref: '#/definitions/public.Variant'
+      error:
+        $ref: '#/definitions/bulk.BulkItemError'
+      id:
+        type: string
+      index:
+        example: 0
+        type: integer
+      status:
+        example: ok
+        type: string
+      wouldDelete:
+        type: boolean
+    type: object
+  dto.BulkWishlistDeleteResult:
+    properties:
+      alreadyRemoved:
+        type: boolean
+      blockers:
+        items:
+          type: string
+        type: array
+      error:
+        $ref: '#/definitions/bulk.BulkItemError'
+      id:
+        type: string
+      index:
+        example: 0
+        type: integer
+      status:
+        example: ok
+        type: string
+      wouldDelete:
+        type: boolean
+    type: object
+  dto.BulkWishlistResult:
+    properties:
+      alreadyExists:
+        type: boolean
+      alreadyRemoved:
+        type: boolean
+      blockers:
+        items:
+          type: string
+        type: array
+      data:
+        $ref: '#/definitions/public.Item'
+      error:
+        $ref: '#/definitions/bulk.BulkItemError'
+      id:
+        type: string
+      index:
+        example: 0
+        type: integer
+      status:
+        example: ok
+        type: string
+      wouldDelete:
+        type: boolean
     type: object
   dto.CreateCategoryRequest:
     properties:
@@ -471,6 +906,52 @@ definitions:
         type: integer
       variant_id:
         type: string
+    type: object
+  public.MyReview:
+    properties:
+      body:
+        example: Lasted the whole month
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      product:
+        $ref: '#/definitions/public.MyReviewProduct'
+      product_id:
+        type: string
+      rating:
+        example: 5
+        type: integer
+      title:
+        example: Great oil
+        type: string
+      updated_at:
+        type: string
+      user_id:
+        type: string
+    type: object
+  public.MyReviewProduct:
+    properties:
+      id:
+        type: string
+      image_url:
+        type: string
+      name:
+        example: Sunseed Cooking Oil 2L
+        type: string
+      slug:
+        example: sunseed-cooking-oil-2l
+        type: string
+    type: object
+  public.MyReviewsResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/public.MyReview'
+        type: array
+      meta:
+        $ref: '#/definitions/pagination.Meta'
     type: object
   public.Order:
     properties:
@@ -1086,23 +1567,34 @@ paths:
       - admin
   /admin/inventory/stock:
     get:
+      description: |-
+        With variantIds, returns one row per variant (comma lists or
+        repeated query params, cap MAX_BULK_ITEMS) plus the ids that do
+        not resolve to a variant. Without variantIds the single
+        product_id read is unchanged.
       parameters:
-      - description: Product ID
+      - description: Product ID (single read)
         in: query
         name: product_id
-        required: true
         type: string
-      - description: Variant ID
+      - description: Variant ID (single read)
         in: query
         name: variant_id
         type: string
+      - collectionFormat: csv
+        description: Variant IDs (comma separated or repeated)
+        in: query
+        items:
+          type: string
+        name: variantIds
+        type: array
       produces:
       - application/json
       responses:
         "200":
-          description: OK
+          description: Variant batch read
           schema:
-            $ref: '#/definitions/public.Stock'
+            $ref: '#/definitions/dto.BulkStockResponse'
         "400":
           description: Bad Request
           schema:
@@ -1156,6 +1648,52 @@ paths:
       security:
       - BearerAuth: []
       summary: Set on-hand stock (admin)
+      tags:
+      - admin
+  /admin/inventory/stock/bulk:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Per-item results; HTTP 200 for a processed batch. With
+        atomic=true every line commits or the whole batch rolls back.
+      parameters:
+      - description: Replay-safe request key (24h)
+        in: header
+        name: Idempotency-Key
+        type: string
+      - description: Stock lines
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.BulkSetStockRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.BulkSetStockResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Set on-hand stock for many SKUs (admin)
       tags:
       - admin
   /admin/products:
@@ -1489,6 +2027,147 @@ paths:
       summary: Set a product's primary image (admin)
       tags:
       - admin
+  /admin/products/bulk:
+    patch:
+      consumes:
+      - application/json
+      description: |-
+        One partial patch per product; slug stays immutable. An empty
+        patch is a per-item validation error. Duplicate ids reject the
+        whole request; dryRun projects without writing.
+      parameters:
+      - description: Replay-safe request key (24h)
+        in: header
+        name: Idempotency-Key
+        type: string
+      - description: Patches
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.BulkUpdateProductsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.BulkUpdateProductsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update products in bulk (admin)
+      tags:
+      - admin
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Per-item results in a 200 envelope. Duplicate generated slugs
+        reject the whole request; a DB slug collision is per item.
+        dryRun validates and projects the rows without writing.
+      parameters:
+      - description: Replay-safe request key (24h)
+        in: header
+        name: Idempotency-Key
+        type: string
+      - description: Products
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.BulkCreateProductsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.BulkCreateProductsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create products in bulk (admin)
+      tags:
+      - admin
+  /admin/products/bulk-delete:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Max 25 ids. Products referenced by order history are blocked
+        per item (CONFLICT); variants, gallery, inventory, carts and
+        wishlists cascade. dryRun reports wouldDelete and blockers
+        without writing.
+      parameters:
+      - description: Replay-safe request key (24h)
+        in: header
+        name: Idempotency-Key
+        type: string
+      - description: Ids
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.BulkDeleteProductsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.BulkDeleteProductsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete products in bulk (admin)
+      tags:
+      - admin
   /admin/reviews/{id}:
     delete:
       description: 'Moderation: abusive or spam reviews.'
@@ -1701,6 +2380,54 @@ paths:
       security:
       - BearerAuth: []
       summary: Update a variant (admin)
+      tags:
+      - admin
+  /admin/variants/bulk:
+    patch:
+      consumes:
+      - application/json
+      description: |-
+        One partial patch per variant; product_id and sku stay
+        immutable. An empty patch is a per-item validation error.
+        Duplicate ids reject the whole request. Availability is read
+        before writes; dryRun projects without writing.
+      parameters:
+      - description: Replay-safe request key (24h)
+        in: header
+        name: Idempotency-Key
+        type: string
+      - description: Patches
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.BulkUpdateVariantsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.BulkUpdateVariantsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update variants in bulk (admin)
       tags:
       - admin
   /auth/login:
@@ -2105,6 +2832,55 @@ paths:
       summary: Change a line's quantity
       tags:
       - cart
+  /cart/items/bulk:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Max 25 lines. Identity comes from the JWT. Duplicate
+        product/variant lines reject the whole request. Non-atomic
+        batches report invalid lines per item and keep going; atomic
+        batches validate first and write all lines in one transaction.
+        The response carries the full updated cart.
+      parameters:
+      - description: Replay-safe request key (24h)
+        in: header
+        name: Idempotency-Key
+        type: string
+      - description: Lines
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.BulkAddItemsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.BulkAddCartResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Add items in bulk
+      tags:
+      - cart
   /categories:
     get:
       description: |-
@@ -2450,6 +3226,13 @@ paths:
         in: query
         name: q
         type: string
+      - collectionFormat: csv
+        description: Restrict to product ids (comma separated or repeated, max MAX_BULK_ITEMS)
+        in: query
+        items:
+          type: string
+        name: ids
+        type: array
       - description: Filter by category UUID
         in: query
         name: category_id
@@ -2705,6 +3488,64 @@ paths:
       summary: Create a variant (admin)
       tags:
       - admin
+  /products/{id}/variants/bulk:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Per-item results in a 200 envelope. The product must exist
+        (whole-request 404). SKUs are uppercased like single create;
+        duplicate SKUs in the batch reject the request, while a DB SKU
+        collision is a per-item CONFLICT. dryRun projects without
+        writing; atomic inserts every SKU in one transaction.
+      parameters:
+      - description: Product ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Replay-safe request key (24h)
+        in: header
+        name: Idempotency-Key
+        type: string
+      - description: SKUs
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.BulkCreateVariantsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.BulkCreateVariantsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create variants in bulk (admin)
+      tags:
+      - admin
   /products/slug/{slug}:
     get:
       description: Pretty-URL lookup used by the storefront.
@@ -2791,6 +3632,48 @@ paths:
       security:
       - BearerAuth: []
       summary: Edit my review
+      tags:
+      - reviews
+  /reviews/me:
+    get:
+      description: |-
+        Caller's own reviews with product context, newest first by
+        default. Sends {"data": [reviews], "meta": {page, limit, …}}.
+      parameters:
+      - description: newest|oldest|highest|lowest
+        in: query
+        name: sort
+        type: string
+      - description: 1-based page (wins over offset)
+        in: query
+        name: page
+        type: integer
+      - description: Page size (default 12, max 100)
+        in: query
+        name: limit
+        type: integer
+      - description: Page offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.MyReviewsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List my reviews
       tags:
       - reviews
   /users/{id}:
@@ -2981,6 +3864,95 @@ paths:
       security:
       - BearerAuth: []
       summary: Unheart a product
+      tags:
+      - wishlist
+  /wishlist/bulk:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Max 50 product ids. Unknown or inactive products are per-item
+        NOT_FOUND; already-hearted rows succeed with alreadyExists.
+        Duplicate ids reject the whole request. atomic inserts every
+        new link in one transaction.
+      parameters:
+      - description: Replay-safe request key (24h)
+        in: header
+        name: Idempotency-Key
+        type: string
+      - description: Products
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.BulkAddWishlistRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.BulkAddWishlistResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Heart products in bulk
+      tags:
+      - wishlist
+  /wishlist/bulk-delete:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Max 50 product ids (not wishlist row ids), matching single
+        DELETE /wishlist/{id}. Unknown products are per-item NOT_FOUND;
+        known-but-not-hearted rows succeed with alreadyRemoved. dryRun
+        reports wouldDelete without writing; atomic removes all rows in
+        one transaction.
+      parameters:
+      - description: Replay-safe request key (24h)
+        in: header
+        name: Idempotency-Key
+        type: string
+      - description: Product ids
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.BulkRemoveWishlistRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.BulkRemoveWishlistResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Unheart products in bulk
       tags:
       - wishlist
 securityDefinitions:

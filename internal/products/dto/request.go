@@ -2,7 +2,7 @@ package dto
 
 import (
 	"github.com/nikhea/malawi-e-commerce-store/internal/products/public"
-	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/bulk"
 )
 
 // CreateProductRequest is the POST /admin/products body. Price is USD
@@ -57,11 +57,73 @@ type BulkDeleteProductsRequest struct {
 	Atomic bool     `json:"atomic"`
 }
 
-// Named response types keep swag happy: it cannot parse a generic
-// instantiation inside an annotation, but resolves a named alias.
-type BulkCreateProductsResponse bulkdto.BulkResponse[public.Product]
-type BulkUpdateProductsResponse bulkdto.BulkResponse[public.Product]
-type BulkDeleteProductsResponse bulkdto.BulkResponse[bulkdto.Empty]
+// BulkProductResult is one product outcome. Declared concretely because swag
+// cannot render generic instantiations.
+type BulkProductResult struct {
+	Index          int                 `json:"index" example:"0"`
+	ID             string              `json:"id,omitempty"`
+	Status         string              `json:"status" example:"ok"`
+	Data           *public.Product     `json:"data,omitempty"`
+	Error          *bulk.BulkItemError `json:"error,omitempty"`
+	AlreadyExists  bool                `json:"alreadyExists,omitempty"`
+	AlreadyRemoved bool                `json:"alreadyRemoved,omitempty"`
+	WouldDelete    bool                `json:"wouldDelete,omitempty"`
+	Blockers       []string            `json:"blockers,omitempty"`
+}
+
+// BulkDeleteResult is the delete-style outcome (no entity payload).
+type BulkDeleteResult struct {
+	Index          int                 `json:"index" example:"0"`
+	ID             string              `json:"id,omitempty"`
+	Status         string              `json:"status" example:"ok"`
+	Error          *bulk.BulkItemError `json:"error,omitempty"`
+	WouldDelete    bool                `json:"wouldDelete,omitempty"`
+	Blockers       []string            `json:"blockers,omitempty"`
+	AlreadyRemoved bool                `json:"alreadyRemoved,omitempty"`
+}
+
+// Documented bulk response shapes.
+type BulkCreateProductsResponse struct {
+	Results []BulkProductResult `json:"results"`
+	Summary bulk.BulkSummary    `json:"summary"`
+}
+
+type BulkUpdateProductsResponse struct {
+	Results []BulkProductResult `json:"results"`
+	Summary bulk.BulkSummary    `json:"summary"`
+}
+
+type BulkDeleteProductsResponse struct {
+	Results []BulkDeleteResult `json:"results"`
+	Summary bulk.BulkSummary   `json:"summary"`
+}
+
+// NewBulkProductResponse projects product service results onto the
+// documented shape.
+func NewBulkProductResponse(results []bulk.BulkResult[public.Product], summary bulk.BulkSummary) BulkCreateProductsResponse {
+	out := make([]BulkProductResult, len(results))
+	for i, r := range results {
+		out[i] = BulkProductResult{
+			Index: r.Index, ID: r.ID, Status: r.Status, Data: r.Data, Error: r.Error,
+			AlreadyExists: r.AlreadyExists, AlreadyRemoved: r.AlreadyRemoved,
+			WouldDelete: r.WouldDelete, Blockers: r.Blockers,
+		}
+	}
+	return BulkCreateProductsResponse{Results: out, Summary: summary}
+}
+
+// NewBulkDeleteResponse projects delete results onto the documented shape.
+func NewBulkDeleteResponse(results []bulk.BulkResult[bulk.Empty], summary bulk.BulkSummary) BulkDeleteProductsResponse {
+	out := make([]BulkDeleteResult, len(results))
+	for i, r := range results {
+		out[i] = BulkDeleteResult{
+			Index: r.Index, ID: r.ID, Status: r.Status, Error: r.Error,
+			WouldDelete: r.WouldDelete, Blockers: r.Blockers,
+			AlreadyRemoved: r.AlreadyRemoved,
+		}
+	}
+	return BulkDeleteProductsResponse{Results: out, Summary: summary}
+}
 
 // ListProductsQuery binds the storefront catalog filters. Dates accept
 // RFC3339 or YYYY-MM-DD; page wins over offset when both are sent.

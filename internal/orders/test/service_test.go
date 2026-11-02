@@ -3,6 +3,7 @@ package test
 import (
 	"context"
 	"fmt"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/bulk"
 	"testing"
 	"time"
 
@@ -12,7 +13,6 @@ import (
 	"github.com/nikhea/malawi-e-commerce-store/internal/orders/public"
 	"github.com/nikhea/malawi-e-commerce-store/internal/orders/service"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
-	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
 )
 
 // fakeRepo is an in-memory orders store with guarded transitions.
@@ -113,7 +113,7 @@ func (f *fakeCart) Get(_ context.Context, userID string) (cartpublic.Cart, error
 func (f *fakeCart) AddItem(context.Context, cartpublic.AddItemInput) (cartpublic.Cart, error) {
 	return cartpublic.Cart{}, nil
 }
-func (f *fakeCart) BulkAdd(context.Context, string, []cartpublic.BulkAddItem, bool) ([]bulkdto.BulkResult[cartpublic.Line], cartpublic.Cart, error) {
+func (f *fakeCart) BulkAdd(context.Context, string, []cartpublic.BulkAddItem, bool) ([]bulk.BulkResult[cartpublic.Line], cartpublic.Cart, error) {
 	return nil, cartpublic.Cart{}, nil
 }
 func (f *fakeCart) List(context.Context, string, cartpublic.ListFilter) (cartpublic.Page, error) {
@@ -141,7 +141,7 @@ type fakeInventory struct {
 func (f *fakeInventory) SetStock(context.Context, string, *string, int) (inventorypublic.Stock, error) {
 	return inventorypublic.Stock{}, nil
 }
-func (f *fakeInventory) BulkSetStock(context.Context, []inventorypublic.BulkStockItem, bool) ([]bulkdto.BulkResult[inventorypublic.Stock], error) {
+func (f *fakeInventory) BulkSetStock(context.Context, []inventorypublic.BulkStockItem, bool) ([]bulk.BulkResult[inventorypublic.Stock], error) {
 	return nil, nil
 }
 func (f *fakeInventory) GetStockByVariants(context.Context, []string) ([]inventorypublic.Stock, []string, error) {

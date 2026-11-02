@@ -7,9 +7,9 @@ package public
 
 import (
 	"context"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/bulk"
 	"time"
 
-	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/pagination"
 )
 
@@ -156,9 +156,9 @@ type Service interface {
 	// Bulk admin writes. Per-item failures stay inside the 200 envelope;
 	// atomic=true rolls the whole batch back on the first failure. dryRun
 	// validates and projects the outcome without writing.
-	BulkCreate(ctx context.Context, items []CreateProductInput, atomic, dryRun bool) ([]bulkdto.BulkResult[Product], error)
-	BulkUpdate(ctx context.Context, items []BulkUpdateItem, atomic, dryRun bool) ([]bulkdto.BulkResult[Product], error)
-	BulkDelete(ctx context.Context, ids []string, atomic, dryRun bool) ([]bulkdto.BulkResult[bulkdto.Empty], error)
+	BulkCreate(ctx context.Context, items []CreateProductInput, atomic, dryRun bool) ([]bulk.BulkResult[Product], error)
+	BulkUpdate(ctx context.Context, items []BulkUpdateItem, atomic, dryRun bool) ([]bulk.BulkResult[Product], error)
+	BulkDelete(ctx context.Context, ids []string, atomic, dryRun bool) ([]bulk.BulkResult[bulk.Empty], error)
 
 	// Gallery. AddImage creates an empty (pending) row; the handler then
 	// enqueues one media job per row. CompleteImage fills the row and

@@ -10,7 +10,6 @@ import (
 	userspublic "github.com/nikhea/malawi-e-commerce-store/internal/users/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/bulk"
-	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/pagination"
 )
 
@@ -233,7 +232,7 @@ func (s *service) AddItem(ctx context.Context, in public.AddItemInput) (public.C
 // BulkAdd adds up to 25 lines for the JWT caller. Identity never comes from
 // the body. Non-atomic batches keep going after a bad line; atomic batches
 // validate everything first and write through one transaction.
-func (s *service) BulkAdd(ctx context.Context, userID string, items []public.BulkAddItem, atomic bool) ([]bulkdto.BulkResult[public.Line], public.Cart, error) {
+func (s *service) BulkAdd(ctx context.Context, userID string, items []public.BulkAddItem, atomic bool) ([]bulk.BulkResult[public.Line], public.Cart, error) {
 	limit := 25
 	if max := bulk.MaxItems(); max < limit {
 		limit = max
@@ -261,10 +260,10 @@ func (s *service) BulkAdd(ctx context.Context, userID string, items []public.Bul
 
 	prepared := make([]model.Item, len(items))
 	itemErrs := make([]error, len(items))
-	results := make([]bulkdto.BulkResult[public.Line], len(items))
+	results := make([]bulk.BulkResult[public.Line], len(items))
 	for i, in := range items {
 		key := bulk.LineKey(strings.TrimSpace(in.ProductID), in.VariantID)
-		results[i] = bulkdto.BulkResult[public.Line]{Index: i, ID: key, Status: "ok"}
+		results[i] = bulk.BulkResult[public.Line]{Index: i, ID: key, Status: "ok"}
 		item, err := s.prepareAdd(ctx, in.ProductID, in.VariantID, in.Qty)
 		if err != nil {
 			itemErrs[i] = err

@@ -2,7 +2,7 @@ package dto
 
 import (
 	"github.com/nikhea/malawi-e-commerce-store/internal/variants/public"
-	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/bulk"
 )
 
 // CreateVariantRequest is the POST /products/:id/variants body.
@@ -40,7 +40,41 @@ type BulkUpdateVariantsRequest struct {
 	Updates []BulkUpdateVariantItem `json:"updates" binding:"required"`
 }
 
-// Named response types keep swag happy: it cannot parse a generic
-// instantiation inside an annotation, but resolves a named alias.
-type BulkCreateVariantsResponse bulkdto.BulkResponse[public.Variant]
-type BulkUpdateVariantsResponse bulkdto.BulkResponse[public.Variant]
+// BulkVariantResult is one variant outcome. Declared concretely because swag
+// cannot render generic instantiations.
+type BulkVariantResult struct {
+	Index          int                 `json:"index" example:"0"`
+	ID             string              `json:"id,omitempty"`
+	Status         string              `json:"status" example:"ok"`
+	Data           *public.Variant     `json:"data,omitempty"`
+	Error          *bulk.BulkItemError `json:"error,omitempty"`
+	AlreadyExists  bool                `json:"alreadyExists,omitempty"`
+	AlreadyRemoved bool                `json:"alreadyRemoved,omitempty"`
+	WouldDelete    bool                `json:"wouldDelete,omitempty"`
+	Blockers       []string            `json:"blockers,omitempty"`
+}
+
+// Documented bulk response shapes.
+type BulkCreateVariantsResponse struct {
+	Results []BulkVariantResult `json:"results"`
+	Summary bulk.BulkSummary    `json:"summary"`
+}
+
+type BulkUpdateVariantsResponse struct {
+	Results []BulkVariantResult `json:"results"`
+	Summary bulk.BulkSummary    `json:"summary"`
+}
+
+// NewBulkVariantResponse projects variant service results onto the
+// documented shape.
+func NewBulkVariantResponse(results []bulk.BulkResult[public.Variant], summary bulk.BulkSummary) BulkCreateVariantsResponse {
+	out := make([]BulkVariantResult, len(results))
+	for i, r := range results {
+		out[i] = BulkVariantResult{
+			Index: r.Index, ID: r.ID, Status: r.Status, Data: r.Data, Error: r.Error,
+			AlreadyExists: r.AlreadyExists, AlreadyRemoved: r.AlreadyRemoved,
+			WouldDelete: r.WouldDelete, Blockers: r.Blockers,
+		}
+	}
+	return BulkCreateVariantsResponse{Results: out, Summary: summary}
+}

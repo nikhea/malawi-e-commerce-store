@@ -127,15 +127,7 @@ func (h *Handler) BulkAdd(c *gin.Context) {
 	}
 	summary := bulk.Summary(results)
 	bulk.Log(c, "cart.bulk_add", started, summary)
-	out := make([]dto.BulkAddResult, len(results))
-	for i, r := range results {
-		out[i] = dto.BulkAddResult(r)
-	}
-	response.OK(c, dto.BulkAddCartResponse{
-		Results: out,
-		Summary: dto.BulkAddSummary{Total: summary.Total, Succeeded: summary.Succeeded, Failed: summary.Failed},
-		Cart:    cart,
-	})
+	response.OK(c, dto.NewBulkAddCartResponse(results, summary, cart))
 }
 
 // SetQty godoc

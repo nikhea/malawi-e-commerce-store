@@ -2,7 +2,7 @@ package dto
 
 import (
 	"github.com/nikhea/malawi-e-commerce-store/internal/cart/public"
-	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/bulk"
 )
 
 // AddItemRequest is the POST /cart/items body. VariantID nil = base
@@ -20,23 +20,40 @@ type BulkAddItemsRequest struct {
 	Items  []AddItemRequest `json:"items" binding:"required"`
 }
 
-// BulkAddResult is one line outcome. A named type keeps swag happy.
-type BulkAddResult bulkdto.BulkResult[public.Line]
-
-// BulkAddSummary mirrors bulkdto.BulkSummary. It is duplicated here because
-// swag cannot resolve the shared package alias through a struct field.
-type BulkAddSummary struct {
-	Total     int `json:"total" example:"2"`
-	Succeeded int `json:"succeeded" example:"1"`
-	Failed    int `json:"failed" example:"1"`
+// BulkAddResult is one line outcome. Declared concretely because swag cannot
+// render generic instantiations.
+type BulkAddResult struct {
+	Index          int                 `json:"index" example:"0"`
+	ID             string              `json:"id,omitempty"`
+	Status         string              `json:"status" example:"ok"`
+	Data           *public.Line        `json:"data,omitempty"`
+	Error          *bulk.BulkItemError `json:"error,omitempty"`
+	AlreadyExists  bool                `json:"alreadyExists,omitempty"`
+	AlreadyRemoved bool                `json:"alreadyRemoved,omitempty"`
+	WouldDelete    bool                `json:"wouldDelete,omitempty"`
+	Blockers       []string            `json:"blockers,omitempty"`
 }
 
 // BulkAddCartResponse adds the full updated cart to the standard bulk
 // envelope so the client never has to re-fetch after a batch add.
 type BulkAddCartResponse struct {
-	Results []BulkAddResult `json:"results"`
-	Summary BulkAddSummary  `json:"summary"`
-	Cart    public.Cart     `json:"cart"`
+	Results []BulkAddResult  `json:"results"`
+	Summary bulk.BulkSummary `json:"summary"`
+	Cart    public.Cart      `json:"cart"`
+}
+
+// NewBulkAddCartResponse projects the service results onto the documented
+// response shape.
+func NewBulkAddCartResponse(results []bulk.BulkResult[public.Line], summary bulk.BulkSummary, cart public.Cart) BulkAddCartResponse {
+	out := make([]BulkAddResult, len(results))
+	for i, r := range results {
+		out[i] = BulkAddResult{
+			Index: r.Index, ID: r.ID, Status: r.Status, Data: r.Data, Error: r.Error,
+			AlreadyExists: r.AlreadyExists, AlreadyRemoved: r.AlreadyRemoved,
+			WouldDelete: r.WouldDelete, Blockers: r.Blockers,
+		}
+	}
+	return BulkAddCartResponse{Results: out, Summary: summary, Cart: cart}
 }
 
 // SetQtyRequest is the PATCH /cart/items/:id body. Qty 0 removes the line.

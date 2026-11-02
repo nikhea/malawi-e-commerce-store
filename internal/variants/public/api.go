@@ -5,9 +5,8 @@ package public
 
 import (
 	"context"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/bulk"
 	"time"
-
-	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
 )
 
 // Variant is one sellable SKU. Price is absolute USD cents, NOT a delta —
@@ -59,8 +58,8 @@ type Service interface {
 	Delete(ctx context.Context, id string) error
 	// BulkCreate creates up to MAX_BULK_ITEMS SKUs for one product. The
 	// product must exist before any item runs.
-	BulkCreate(ctx context.Context, productID string, items []CreateVariantInput, atomic, dryRun bool) ([]bulkdto.BulkResult[Variant], error)
+	BulkCreate(ctx context.Context, productID string, items []CreateVariantInput, atomic, dryRun bool) ([]bulk.BulkResult[Variant], error)
 	// BulkUpdate applies one partial patch per variant. Duplicate ids and
 	// empty patches are rejected; availability is read before any write.
-	BulkUpdate(ctx context.Context, items []BulkUpdateItem, atomic, dryRun bool) ([]bulkdto.BulkResult[Variant], error)
+	BulkUpdate(ctx context.Context, items []BulkUpdateItem, atomic, dryRun bool) ([]bulk.BulkResult[Variant], error)
 }

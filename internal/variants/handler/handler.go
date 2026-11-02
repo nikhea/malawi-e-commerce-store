@@ -160,7 +160,7 @@ func (h *Handler) BulkCreate(c *gin.Context) {
 	}
 	summary := bulk.Summary(results)
 	bulk.Log(c, "variants.bulk_create", started, summary)
-	response.OK(c, dto.BulkCreateVariantsResponse{Results: results, Summary: summary})
+	response.OK(c, dto.NewBulkVariantResponse(results, summary))
 }
 
 // BulkUpdate godoc
@@ -204,5 +204,5 @@ func (h *Handler) BulkUpdate(c *gin.Context) {
 	}
 	summary := bulk.Summary(results)
 	bulk.Log(c, "variants.bulk_update", started, summary)
-	response.OK(c, dto.BulkUpdateVariantsResponse{Results: results, Summary: summary})
+	response.OK(c, dto.NewBulkVariantResponse(results, summary))
 }

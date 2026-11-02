@@ -1,16 +1,13 @@
-// Package dto holds the shared wire shapes for bulk endpoints. Every bulk
-// response keeps per-item results so one bad row never kills the batch.
-//
-// Swag (1.16.x) cannot parse a generic instantiation inside an annotation,
-// so modules declare a named type based on BulkResponse[T] (for example
-// `type BulkSetStockResponse bulkdto.BulkResponse[public.Stock]`). Swag
-// resolves that named type correctly.
-package dto
+package bulk
 
 import "github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
 
 // BulkSummary is the batch outcome. Succeeded counts only "ok" items;
 // failed covers error and rolled_back items.
+//
+// These wire shapes live in this package (not a nested dto package) so swag
+// resolves them from module annotations: it parses `pkg/bulk` but not the
+// deeper `pkg/bulk/dto`.
 type BulkSummary struct {
 	Total     int `json:"total" example:"2"`
 	Succeeded int `json:"succeeded" example:"1"`

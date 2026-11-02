@@ -5,9 +5,8 @@ package public
 
 import (
 	"context"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/bulk"
 	"time"
-
-	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
 )
 
 // Stock is the availability view. Available = OnHand - Reserved.
@@ -40,7 +39,7 @@ type Service interface {
 	SetStock(ctx context.Context, productID string, variantID *string, qty int) (Stock, error)
 	// BulkSetStock sets on-hand stock for many SKUs. With atomic=true every
 	// line commits or the batch rolls back; otherwise failures are per item.
-	BulkSetStock(ctx context.Context, items []BulkStockItem, atomic bool) ([]bulkdto.BulkResult[Stock], error)
+	BulkSetStock(ctx context.Context, items []BulkStockItem, atomic bool) ([]bulk.BulkResult[Stock], error)
 	// GetStockByVariants reads availability for up to MAX_BULK_ITEMS
 	// variants. Unknown ids are returned in notFound; known variants with no
 	// inventory row read as zero stock.

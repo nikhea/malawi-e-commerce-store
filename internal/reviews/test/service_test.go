@@ -2,6 +2,7 @@ package test
 
 import (
 	"context"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/bulk"
 	"sort"
 	"testing"
 	"time"
@@ -12,7 +13,6 @@ import (
 	"github.com/nikhea/malawi-e-commerce-store/internal/reviews/service"
 	userspublic "github.com/nikhea/malawi-e-commerce-store/internal/users/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
-	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
 )
 
 // fakeRepo is an in-memory review store.
@@ -371,12 +371,12 @@ func TestListMine(t *testing.T) {
 }
 
 // Bulk admin writes are not exercised by this module's tests.
-func (fakeProducts) BulkCreate(context.Context, []productspublic.CreateProductInput, bool, bool) ([]bulkdto.BulkResult[productspublic.Product], error) {
+func (fakeProducts) BulkCreate(context.Context, []productspublic.CreateProductInput, bool, bool) ([]bulk.BulkResult[productspublic.Product], error) {
 	return nil, nil
 }
-func (fakeProducts) BulkUpdate(context.Context, []productspublic.BulkUpdateItem, bool, bool) ([]bulkdto.BulkResult[productspublic.Product], error) {
+func (fakeProducts) BulkUpdate(context.Context, []productspublic.BulkUpdateItem, bool, bool) ([]bulk.BulkResult[productspublic.Product], error) {
 	return nil, nil
 }
-func (fakeProducts) BulkDelete(context.Context, []string, bool, bool) ([]bulkdto.BulkResult[bulkdto.Empty], error) {
+func (fakeProducts) BulkDelete(context.Context, []string, bool, bool) ([]bulk.BulkResult[bulk.Empty], error) {
 	return nil, nil
 }

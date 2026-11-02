@@ -13,7 +13,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
-	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/middleware"
 )
 
@@ -104,24 +103,24 @@ func LineKey(productID string, variantID *string) string {
 }
 
 // OK builds a successful item.
-func OK[T any](index int, id string, data T) bulkdto.BulkResult[T] {
-	return bulkdto.BulkResult[T]{Index: index, ID: id, Status: "ok", Data: &data}
+func OK[T any](index int, id string, data T) BulkResult[T] {
+	return BulkResult[T]{Index: index, ID: id, Status: "ok", Data: &data}
 }
 
 // Failed builds an error item. Foreign errors become INTERNAL with the
 // generic message so internals never leak.
-func Failed[T any](index int, id string, err error) bulkdto.BulkResult[T] {
-	e := bulkdto.BulkItemError{Code: apperr.CodeOf(err), Message: "internal server error"}
+func Failed[T any](index int, id string, err error) BulkResult[T] {
+	e := BulkItemError{Code: apperr.CodeOf(err), Message: "internal server error"}
 	var appErr *apperr.Error
 	if errors.As(err, &appErr) && appErr.Message != "" && appErr.Code != apperr.CodeInternal {
 		e.Message = appErr.Message
 	}
-	return bulkdto.BulkResult[T]{Index: index, ID: id, Status: "error", Error: &e}
+	return BulkResult[T]{Index: index, ID: id, Status: "error", Error: &e}
 }
 
 // Rollback marks every item rolled_back. Only the first failing item
 // carries the real error; the rest stay silent per the bulk contract.
-func Rollback[T any](results []bulkdto.BulkResult[T], failIndex int, err error) []bulkdto.BulkResult[T] {
+func Rollback[T any](results []BulkResult[T], failIndex int, err error) []BulkResult[T] {
 	for i := range results {
 		results[i].Status = "rolled_back"
 		results[i].Data = nil
@@ -135,8 +134,8 @@ func Rollback[T any](results []bulkdto.BulkResult[T], failIndex int, err error) 
 
 // Summary counts a result set. Anything not "ok" (error or rolled_back)
 // counts as failed.
-func Summary[T any](results []bulkdto.BulkResult[T]) bulkdto.BulkSummary {
-	s := bulkdto.BulkSummary{Total: len(results)}
+func Summary[T any](results []BulkResult[T]) BulkSummary {
+	s := BulkSummary{Total: len(results)}
 	for _, r := range results {
 		if r.Status == "ok" {
 			s.Succeeded++
@@ -149,7 +148,7 @@ func Summary[T any](results []bulkdto.BulkResult[T]) bulkdto.BulkSummary {
 
 // Log writes the single audit line every bulk request emits. There is no
 // per-item admin audit trail in this codebase today.
-func Log(c *gin.Context, endpoint string, started time.Time, s bulkdto.BulkSummary) {
+func Log(c *gin.Context, endpoint string, started time.Time, s BulkSummary) {
 	log.Printf("bulk user=%s endpoint=%s total=%d succeeded=%d failed=%d duration=%s request_id=%s",
 		middleware.UserIDOf(c), endpoint, s.Total, s.Succeeded, s.Failed,
 		time.Since(started), middleware.RequestIDOf(c))

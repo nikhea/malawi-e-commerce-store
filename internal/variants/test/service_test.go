@@ -2,6 +2,7 @@ package test
 
 import (
 	"context"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/bulk"
 	"testing"
 	"time"
 
@@ -10,7 +11,6 @@ import (
 	"github.com/nikhea/malawi-e-commerce-store/internal/variants/public"
 	"github.com/nikhea/malawi-e-commerce-store/internal/variants/service"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
-	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
 )
 
 // fakeRepo is an in-memory Repository. No real DB.
@@ -128,7 +128,7 @@ type fakeInventory struct{}
 func (fakeInventory) SetStock(context.Context, string, *string, int) (inventorypublic.Stock, error) {
 	return inventorypublic.Stock{}, nil
 }
-func (fakeInventory) BulkSetStock(context.Context, []inventorypublic.BulkStockItem, bool) ([]bulkdto.BulkResult[inventorypublic.Stock], error) {
+func (fakeInventory) BulkSetStock(context.Context, []inventorypublic.BulkStockItem, bool) ([]bulk.BulkResult[inventorypublic.Stock], error) {
 	return nil, nil
 }
 func (fakeInventory) GetStockByVariants(context.Context, []string) ([]inventorypublic.Stock, []string, error) {

@@ -11,7 +11,6 @@ import (
 	variantspublic "github.com/nikhea/malawi-e-commerce-store/internal/variants/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/bulk"
-	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/pagination"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/slug"
 )
@@ -357,7 +356,7 @@ func (s *service) Delete(ctx context.Context, id string) error {
 // BulkCreate creates many products. Validation is per item; a duplicate
 // resulting slug is a whole-request rejection because it makes the batch
 // ambiguous. With atomic=true nothing is written unless every item is valid.
-func (s *service) BulkCreate(ctx context.Context, items []public.CreateProductInput, atomic, dryRun bool) ([]bulkdto.BulkResult[public.Product], error) {
+func (s *service) BulkCreate(ctx context.Context, items []public.CreateProductInput, atomic, dryRun bool) ([]bulk.BulkResult[public.Product], error) {
 	if err := bulk.CheckCount(len(items), bulk.MaxItems()); err != nil {
 		return nil, err
 	}
@@ -376,9 +375,9 @@ func (s *service) BulkCreate(ctx context.Context, items []public.CreateProductIn
 		return nil, apperr.Duplicate("duplicate product slug: " + dup)
 	}
 
-	results := make([]bulkdto.BulkResult[public.Product], len(items))
+	results := make([]bulk.BulkResult[public.Product], len(items))
 	for i := range items {
-		results[i] = bulkdto.BulkResult[public.Product]{Index: i, ID: prepared[i].Slug, Status: "ok"}
+		results[i] = bulk.BulkResult[public.Product]{Index: i, ID: prepared[i].Slug, Status: "ok"}
 		if prepErrs[i] != nil {
 			results[i] = bulk.Failed[public.Product](i, prepared[i].Slug, prepErrs[i])
 		}
@@ -434,7 +433,7 @@ func isEmptyPatch(in public.UpdateProductInput) bool {
 
 // BulkUpdate applies one patch per product. Empty patches are per-item
 // validation errors; duplicate ids reject the whole batch.
-func (s *service) BulkUpdate(ctx context.Context, items []public.BulkUpdateItem, atomic, dryRun bool) ([]bulkdto.BulkResult[public.Product], error) {
+func (s *service) BulkUpdate(ctx context.Context, items []public.BulkUpdateItem, atomic, dryRun bool) ([]bulk.BulkResult[public.Product], error) {
 	if err := bulk.CheckCount(len(items), bulk.MaxItems()); err != nil {
 		return nil, err
 	}
@@ -448,9 +447,9 @@ func (s *service) BulkUpdate(ctx context.Context, items []public.BulkUpdateItem,
 
 	projected := make([]model.Product, len(items))
 	itemErrs := make([]error, len(items))
-	results := make([]bulkdto.BulkResult[public.Product], len(items))
+	results := make([]bulk.BulkResult[public.Product], len(items))
 	for i, it := range items {
-		results[i] = bulkdto.BulkResult[public.Product]{Index: i, ID: ids[i], Status: "ok"}
+		results[i] = bulk.BulkResult[public.Product]{Index: i, ID: ids[i], Status: "ok"}
 		if ids[i] == "" {
 			itemErrs[i] = apperr.Validation("id is required")
 			results[i] = bulk.Failed[public.Product](i, ids[i], itemErrs[i])
@@ -521,7 +520,7 @@ func (s *service) BulkUpdate(ctx context.Context, items []public.BulkUpdateItem,
 // BulkDelete hard-deletes products, capped lower than other batches (25).
 // A product referenced by order history is blocked per item: orders keep
 // snapshots but must stay attributable to a real catalog row.
-func (s *service) BulkDelete(ctx context.Context, ids []string, atomic, dryRun bool) ([]bulkdto.BulkResult[bulkdto.Empty], error) {
+func (s *service) BulkDelete(ctx context.Context, ids []string, atomic, dryRun bool) ([]bulk.BulkResult[bulk.Empty], error) {
 	limit := 25
 	if max := bulk.MaxItems(); max < limit {
 		limit = max
@@ -546,15 +545,15 @@ func (s *service) BulkDelete(ctx context.Context, ids []string, atomic, dryRun b
 		return nil, err
 	}
 
-	results := make([]bulkdto.BulkResult[bulkdto.Empty], len(ids))
+	results := make([]bulk.BulkResult[bulk.Empty], len(ids))
 	for i, id := range ids {
-		results[i] = bulkdto.BulkResult[bulkdto.Empty]{Index: i, ID: id, Status: "ok"}
+		results[i] = bulk.BulkResult[bulk.Empty]{Index: i, ID: id, Status: "ok"}
 		if id == "" {
-			results[i] = bulk.Failed[bulkdto.Empty](i, id, apperr.Validation("id is required"))
+			results[i] = bulk.Failed[bulk.Empty](i, id, apperr.Validation("id is required"))
 			continue
 		}
 		if _, ok := blockers[id]; !ok {
-			results[i] = bulk.Failed[bulkdto.Empty](i, id, apperr.NotFound("product not found"))
+			results[i] = bulk.Failed[bulk.Empty](i, id, apperr.NotFound("product not found"))
 		}
 	}
 	if dryRun {
@@ -593,7 +592,7 @@ func (s *service) BulkDelete(ctx context.Context, ids []string, atomic, dryRun b
 			return bulk.Rollback(results, failIndex, err), nil
 		}
 		for i, id := range ids {
-			results[i] = bulk.OK[bulkdto.Empty](i, id, bulkdto.Empty{})
+			results[i] = bulk.OK[bulk.Empty](i, id, bulk.Empty{})
 		}
 		return results, nil
 	}
@@ -604,14 +603,14 @@ func (s *service) BulkDelete(ctx context.Context, ids []string, atomic, dryRun b
 			continue // already marked NOT_FOUND
 		}
 		if b.OrderItems > 0 {
-			results[i] = bulk.Failed[bulkdto.Empty](i, id, blocked(b))
+			results[i] = bulk.Failed[bulk.Empty](i, id, blocked(b))
 			continue
 		}
 		if err := s.repo.Delete(ctx, id); err != nil {
-			results[i] = bulk.Failed[bulkdto.Empty](i, id, err)
+			results[i] = bulk.Failed[bulk.Empty](i, id, err)
 			continue
 		}
-		results[i] = bulk.OK[bulkdto.Empty](i, id, bulkdto.Empty{})
+		results[i] = bulk.OK[bulk.Empty](i, id, bulk.Empty{})
 	}
 	return results, nil
 }

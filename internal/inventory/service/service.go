@@ -9,7 +9,6 @@ import (
 	"github.com/nikhea/malawi-e-commerce-store/internal/inventory/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/bulk"
-	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
 )
 
 var _ public.Service = (*service)(nil)
@@ -77,7 +76,7 @@ func validateStockItem(it public.BulkStockItem) error {
 // BulkSetStock sets many on-hand quantities. Non-atomic writes run one by
 // one; atomic writes validate everything first and then share one
 // transaction, so a single bad line leaves every row untouched.
-func (s *service) BulkSetStock(ctx context.Context, items []public.BulkStockItem, atomic bool) ([]bulkdto.BulkResult[public.Stock], error) {
+func (s *service) BulkSetStock(ctx context.Context, items []public.BulkStockItem, atomic bool) ([]bulk.BulkResult[public.Stock], error) {
 	if err := bulk.CheckCount(len(items), bulk.MaxItems()); err != nil {
 		return nil, err
 	}
@@ -89,9 +88,9 @@ func (s *service) BulkSetStock(ctx context.Context, items []public.BulkStockItem
 		return nil, apperr.Duplicate("duplicate stock line: " + dup)
 	}
 
-	results := make([]bulkdto.BulkResult[public.Stock], len(items))
+	results := make([]bulk.BulkResult[public.Stock], len(items))
 	for i, it := range items {
-		results[i] = bulkdto.BulkResult[public.Stock]{Index: i, ID: stockID(it), Status: "ok"}
+		results[i] = bulk.BulkResult[public.Stock]{Index: i, ID: stockID(it), Status: "ok"}
 	}
 
 	if !atomic {

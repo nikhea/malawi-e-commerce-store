@@ -10,7 +10,6 @@ import (
 	"github.com/nikhea/malawi-e-commerce-store/internal/wishlist/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/bulk"
-	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/pagination"
 )
 
@@ -163,7 +162,7 @@ func normalizeIDs(productIDs []string, label string) ([]string, []string, error)
 // BulkAdd hearts up to MAX_BULK_ITEMS products. Unknown or inactive products
 // are per-item NOT_FOUND; already-hearted links are success with
 // AlreadyExists. atomic inserts every new link in one transaction.
-func (s *service) BulkAdd(ctx context.Context, userID string, productIDs []string, atomic bool) ([]bulkdto.BulkResult[public.Item], error) {
+func (s *service) BulkAdd(ctx context.Context, userID string, productIDs []string, atomic bool) ([]bulk.BulkResult[public.Item], error) {
 	if err := bulk.CheckCount(len(productIDs), bulk.MaxItems()); err != nil {
 		return nil, err
 	}
@@ -177,9 +176,9 @@ func (s *service) BulkAdd(ctx context.Context, userID string, productIDs []strin
 
 	details := make([]productspublic.Detail, len(ids))
 	itemErrs := make([]error, len(ids))
-	results := make([]bulkdto.BulkResult[public.Item], len(ids))
+	results := make([]bulk.BulkResult[public.Item], len(ids))
 	for i, id := range ids {
-		results[i] = bulkdto.BulkResult[public.Item]{Index: i, ID: id, Status: "ok"}
+		results[i] = bulk.BulkResult[public.Item]{Index: i, ID: id, Status: "ok"}
 		if id == "" {
 			itemErrs[i] = apperr.Validation("product id is required")
 			results[i] = bulk.Failed[public.Item](i, id, itemErrs[i])
@@ -237,7 +236,7 @@ func (s *service) BulkAdd(ctx context.Context, userID string, productIDs []strin
 // BulkRemove unhearts by product id (matching single DELETE /wishlist/{id}).
 // Unknown products are per-item NOT_FOUND; known-but-not-hearted links are
 // success with AlreadyRemoved. dryRun reports WouldDelete without writing.
-func (s *service) BulkRemove(ctx context.Context, userID string, productIDs []string, atomic, dryRun bool) ([]bulkdto.BulkResult[bulkdto.Empty], error) {
+func (s *service) BulkRemove(ctx context.Context, userID string, productIDs []string, atomic, dryRun bool) ([]bulk.BulkResult[bulk.Empty], error) {
 	if err := bulk.CheckCount(len(productIDs), bulk.MaxItems()); err != nil {
 		return nil, err
 	}
@@ -254,18 +253,18 @@ func (s *service) BulkRemove(ctx context.Context, userID string, productIDs []st
 	}
 
 	itemErrs := make([]error, len(ids))
-	results := make([]bulkdto.BulkResult[bulkdto.Empty], len(ids))
+	results := make([]bulk.BulkResult[bulk.Empty], len(ids))
 	toRemove := make([]string, 0, len(ids))
 	for i, id := range ids {
-		results[i] = bulk.OK[bulkdto.Empty](i, id, bulkdto.Empty{})
+		results[i] = bulk.OK[bulk.Empty](i, id, bulk.Empty{})
 		if id == "" {
 			itemErrs[i] = apperr.Validation("product id is required")
-			results[i] = bulk.Failed[bulkdto.Empty](i, id, itemErrs[i])
+			results[i] = bulk.Failed[bulk.Empty](i, id, itemErrs[i])
 			continue
 		}
 		if _, err := s.products.GetByID(ctx, id); err != nil {
 			itemErrs[i] = err
-			results[i] = bulk.Failed[bulkdto.Empty](i, id, err)
+			results[i] = bulk.Failed[bulk.Empty](i, id, err)
 			continue
 		}
 		if existing[id] {
@@ -320,10 +319,10 @@ func (s *service) BulkRemove(ctx context.Context, userID string, productIDs []st
 				results[i].AlreadyRemoved = true
 				continue
 			}
-			results[i] = bulk.Failed[bulkdto.Empty](i, id, err)
+			results[i] = bulk.Failed[bulk.Empty](i, id, err)
 			continue
 		}
-		results[i] = bulk.OK[bulkdto.Empty](i, id, bulkdto.Empty{})
+		results[i] = bulk.OK[bulk.Empty](i, id, bulk.Empty{})
 	}
 	return results, nil
 }

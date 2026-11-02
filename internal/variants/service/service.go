@@ -9,7 +9,6 @@ import (
 	"github.com/nikhea/malawi-e-commerce-store/internal/variants/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/bulk"
-	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
 )
 
 var _ public.Service = (*service)(nil)
@@ -170,7 +169,7 @@ func (s *service) Delete(ctx context.Context, id string) error {
 // existence check is whole-request (404) so a bad path never produces a
 // half-applied batch. Duplicate SKUs inside the batch reject the request;
 // a DB-level SKU collision is per item.
-func (s *service) BulkCreate(ctx context.Context, productID string, items []public.CreateVariantInput, atomic, dryRun bool) ([]bulkdto.BulkResult[public.Variant], error) {
+func (s *service) BulkCreate(ctx context.Context, productID string, items []public.CreateVariantInput, atomic, dryRun bool) ([]bulk.BulkResult[public.Variant], error) {
 	if err := bulk.CheckCount(len(items), bulk.MaxItems()); err != nil {
 		return nil, err
 	}
@@ -201,9 +200,9 @@ func (s *service) BulkCreate(ctx context.Context, productID string, items []publ
 		return nil, apperr.Duplicate("duplicate variant sku: " + dup)
 	}
 
-	results := make([]bulkdto.BulkResult[public.Variant], len(items))
+	results := make([]bulk.BulkResult[public.Variant], len(items))
 	for i := range items {
-		results[i] = bulkdto.BulkResult[public.Variant]{Index: i, ID: prepared[i].SKU, Status: "ok"}
+		results[i] = bulk.BulkResult[public.Variant]{Index: i, ID: prepared[i].SKU, Status: "ok"}
 		if prepErrs[i] != nil {
 			results[i] = bulk.Failed[public.Variant](i, prepared[i].SKU, prepErrs[i])
 		}
@@ -255,7 +254,7 @@ func (s *service) BulkCreate(ctx context.Context, productID string, items []publ
 // per-item validation errors; duplicate ids reject the whole batch. Stock is
 // read for every item before any write, so an inventory failure cannot leave
 // a committed write behind a 500.
-func (s *service) BulkUpdate(ctx context.Context, items []public.BulkUpdateItem, atomic, dryRun bool) ([]bulkdto.BulkResult[public.Variant], error) {
+func (s *service) BulkUpdate(ctx context.Context, items []public.BulkUpdateItem, atomic, dryRun bool) ([]bulk.BulkResult[public.Variant], error) {
 	if err := bulk.CheckCount(len(items), bulk.MaxItems()); err != nil {
 		return nil, err
 	}
@@ -274,9 +273,9 @@ func (s *service) BulkUpdate(ctx context.Context, items []public.BulkUpdateItem,
 	projected := make([]model.Variant, len(items))
 	available := make([]int, len(items))
 	itemErrs := make([]error, len(items))
-	results := make([]bulkdto.BulkResult[public.Variant], len(items))
+	results := make([]bulk.BulkResult[public.Variant], len(items))
 	for i, it := range items {
-		results[i] = bulkdto.BulkResult[public.Variant]{Index: i, ID: ids[i], Status: "ok"}
+		results[i] = bulk.BulkResult[public.Variant]{Index: i, ID: ids[i], Status: "ok"}
 		if ids[i] == "" {
 			itemErrs[i] = apperr.Validation("id is required")
 			results[i] = bulk.Failed[public.Variant](i, ids[i], itemErrs[i])

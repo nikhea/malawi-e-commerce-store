@@ -4,9 +4,9 @@ package public
 
 import (
 	"context"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/bulk"
 	"time"
 
-	bulkdto "github.com/nikhea/malawi-e-commerce-store/pkg/bulk/dto"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/pagination"
 )
 
@@ -67,9 +67,9 @@ type Service interface {
 	// BulkAdd hearts up to MAX_BULK_ITEMS products. Unknown or inactive
 	// products are per-item NOT_FOUND; already-hearted rows succeed with
 	// AlreadyExists.
-	BulkAdd(ctx context.Context, userID string, productIDs []string, atomic bool) ([]bulkdto.BulkResult[Item], error)
+	BulkAdd(ctx context.Context, userID string, productIDs []string, atomic bool) ([]bulk.BulkResult[Item], error)
 	// BulkRemove unhearts by product id. Unknown products are per-item
 	// NOT_FOUND; known-but-not-hearted rows succeed with AlreadyRemoved.
 	// dryRun reports WouldDelete without writing.
-	BulkRemove(ctx context.Context, userID string, productIDs []string, atomic, dryRun bool) ([]bulkdto.BulkResult[bulkdto.Empty], error)
+	BulkRemove(ctx context.Context, userID string, productIDs []string, atomic, dryRun bool) ([]bulk.BulkResult[bulk.Empty], error)
 }
