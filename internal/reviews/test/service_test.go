@@ -2,7 +2,9 @@ package test
 
 import (
 	"context"
+	"sort"
 	"testing"
+	"time"
 
 	productspublic "github.com/nikhea/malawi-e-commerce-store/internal/products/public"
 	"github.com/nikhea/malawi-e-commerce-store/internal/reviews/model"
@@ -18,6 +20,7 @@ type fakeRepo struct {
 	byID      map[string]model.Review
 	byPair    map[string]string // user|product → id
 	byProduct map[string][]string
+	seq       int
 }
 
 func newFakeRepo() *fakeRepo {
@@ -29,11 +32,50 @@ func (f *fakeRepo) Create(_ context.Context, r model.Review) (model.Review, erro
 	if _, taken := f.byPair[k]; taken {
 		return model.Review{}, apperr.Conflict("review already exists")
 	}
-	r.ID = "rev-" + r.UserID
+	f.seq++
+	r.ID = "rev-" + r.UserID + "-" + r.ProductID
+	r.CreatedAt = time.Unix(0, int64(f.seq))
 	f.byID[r.ID] = r
 	f.byPair[k] = r.ID
 	f.byProduct[r.ProductID] = append(f.byProduct[r.ProductID], r.ID)
 	return r, nil
+}
+
+// ListByUser mirrors the repository join: owner predicate plus the product
+// columns the service attaches to each row.
+func (f *fakeRepo) ListByUser(_ context.Context, userID string, filter model.ListFilter) ([]model.MyReviewRow, int64, error) {
+	rows := []model.MyReviewRow{}
+	for _, r := range f.byID {
+		if r.UserID != userID {
+			continue
+		}
+		rows = append(rows, model.MyReviewRow{
+			Review: r, ProductName: "Oil " + r.ProductID,
+			ProductSlug: "oil-" + r.ProductID, ProductImageURL: "img-" + r.ProductID,
+		})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		switch filter.Sort {
+		case "oldest":
+			return rows[i].CreatedAt.Before(rows[j].CreatedAt)
+		case "highest":
+			return rows[i].Rating > rows[j].Rating
+		case "lowest":
+			return rows[i].Rating < rows[j].Rating
+		default: // newest
+			return rows[i].CreatedAt.After(rows[j].CreatedAt)
+		}
+	})
+	total := int64(len(rows))
+	start := filter.Offset
+	if start > len(rows) {
+		start = len(rows)
+	}
+	end := len(rows)
+	if filter.Limit > 0 && start+filter.Limit < end {
+		end = start + filter.Limit
+	}
+	return rows[start:end], total, nil
 }
 
 func (f *fakeRepo) GetByID(_ context.Context, id string) (model.Review, error) {
@@ -102,17 +144,19 @@ func (f *fakeRepo) Delete(_ context.Context, id string) error {
 	return nil
 }
 
-// fakeProducts knows "prod-1" only.
+// fakeProducts knows "prod-1" and "prod-2" only.
 type fakeProducts struct{}
 
 func (fakeProducts) Create(context.Context, productspublic.CreateProductInput) (productspublic.Product, error) {
 	return productspublic.Product{}, nil
 }
 func (fakeProducts) GetByID(_ context.Context, id string) (productspublic.Detail, error) {
-	if id != "prod-1" {
+	if id != "prod-1" && id != "prod-2" {
 		return productspublic.Detail{}, apperr.NotFound("product not found")
 	}
-	return productspublic.Detail{Product: productspublic.Product{ID: "prod-1"}}, nil
+	return productspublic.Detail{Product: productspublic.Product{
+		ID: id, Name: "Oil " + id, Slug: "oil-" + id, IsActive: true,
+	}}, nil
 }
 func (fakeProducts) GetBySlug(context.Context, string) (productspublic.Detail, error) {
 	return productspublic.Detail{}, apperr.NotFound("product not found")
@@ -271,6 +315,60 @@ func TestReviewLifecycle(t *testing.T) {
 }
 
 func intptr(i int) *int { return &i }
+
+func TestListMine(t *testing.T) {
+	ctx := context.Background()
+	svc := service.NewService(newFakeRepo(), fakeProducts{}, fakeUsers{})
+
+	for _, in := range []public.CreateReviewInput{
+		{UserID: "u1", ProductID: "prod-1", Rating: 5, Title: "First"},
+		{UserID: "u1", ProductID: "prod-2", Rating: 3, Title: "Second"},
+		{UserID: "u2", ProductID: "prod-1", Rating: 1, Title: "Other"},
+	} {
+		if _, err := svc.Create(ctx, in); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	// Only the caller's rows, newest first, product context attached.
+	page, err := svc.ListMine(ctx, "u1", public.ListFilter{})
+	if err != nil {
+		t.Fatalf("list mine: %v", err)
+	}
+	if page.Meta.Total != 2 || page.Meta.Limit != 12 || len(page.Items) != 2 {
+		t.Fatalf("bad page: %+v", page)
+	}
+	if page.Items[0].Title != "Second" {
+		t.Fatalf("expected newest first, got %+v", page.Items)
+	}
+	if page.Items[0].Product.ID != "prod-2" || page.Items[0].Product.Name == "" ||
+		page.Items[0].Product.Slug != "oil-prod-2" || page.Items[0].Product.ImageURL != "img-prod-2" {
+		t.Fatalf("product context missing: %+v", page.Items[0])
+	}
+	if page.Items[0].UserID != "u1" {
+		t.Fatalf("leaked another user's review: %+v", page.Items[0])
+	}
+
+	// Pagination and explicit sort.
+	paged, err := svc.ListMine(ctx, "u1", public.ListFilter{Sort: "oldest", Limit: 1})
+	if err != nil {
+		t.Fatalf("paged: %v", err)
+	}
+	if paged.Meta.Total != 2 || len(paged.Items) != 1 || paged.Items[0].Title != "First" {
+		t.Fatalf("bad paged result: %+v", paged)
+	}
+
+	// Guardrails.
+	if _, err := svc.ListMine(ctx, "", public.ListFilter{}); apperr.CodeOf(err) != apperr.CodeValidation {
+		t.Fatalf("expected VALIDATION_ERROR, got %v", err)
+	}
+	if _, err := svc.ListMine(ctx, "u1", public.ListFilter{Sort: "random"}); apperr.CodeOf(err) != apperr.CodeValidation {
+		t.Fatalf("expected VALIDATION_ERROR, got %v", err)
+	}
+	if _, err := svc.ListMine(ctx, "u1", public.ListFilter{Limit: -1}); apperr.CodeOf(err) != apperr.CodeValidation {
+		t.Fatalf("expected VALIDATION_ERROR, got %v", err)
+	}
+}
 
 // Bulk admin writes are not exercised by this module's tests.
 func (fakeProducts) BulkCreate(context.Context, []productspublic.CreateProductInput, bool, bool) ([]bulkdto.BulkResult[productspublic.Product], error) {

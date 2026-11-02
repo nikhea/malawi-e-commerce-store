@@ -21,27 +21,34 @@ func NewPostgres(pool *pgxpool.Pool) *Postgres {
 	return &Postgres{pool: pool}
 }
 
-func (r *Postgres) Add(ctx context.Context, userID, productID string) (model.Item, error) {
+// queryRower is the subset shared by *pgxpool.Pool and pgx.Tx, so the
+// single and transactional add paths run identical SQL.
+type queryRower interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func addOne(ctx context.Context, db queryRower, userID, productID string) (model.Item, bool, error) {
 	const q = `INSERT INTO wishlist_items (user_id, product_id) VALUES ($1, $2)
 	           ON CONFLICT (user_id, product_id) DO NOTHING
 	           RETURNING id, user_id, product_id, created_at`
 	var i model.Item
-	err := r.pool.QueryRow(ctx, q, userID, productID).Scan(&i.ID, &i.UserID, &i.ProductID, &i.CreatedAt)
+	err := db.QueryRow(ctx, q, userID, productID).Scan(&i.ID, &i.UserID, &i.ProductID, &i.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Conflict-no-op: link already exists, read it back.
 		const get = `SELECT id, user_id, product_id, created_at
 		             FROM wishlist_items WHERE user_id = $1 AND product_id = $2`
-		return r.get(ctx, get, userID, productID)
+		i, err = getOne(ctx, db, get, userID, productID)
+		return i, false, err
 	}
 	if err != nil {
-		return model.Item{}, apperr.Internal(err)
+		return model.Item{}, false, apperr.Internal(err)
 	}
-	return i, nil
+	return i, true, nil
 }
 
-func (r *Postgres) get(ctx context.Context, q string, args ...any) (model.Item, error) {
+func getOne(ctx context.Context, db queryRower, q string, args ...any) (model.Item, error) {
 	var i model.Item
-	err := r.pool.QueryRow(ctx, q, args...).Scan(&i.ID, &i.UserID, &i.ProductID, &i.CreatedAt)
+	err := db.QueryRow(ctx, q, args...).Scan(&i.ID, &i.UserID, &i.ProductID, &i.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return model.Item{}, apperr.NotFound("wishlist item not found")
 	}
@@ -49,6 +56,59 @@ func (r *Postgres) get(ctx context.Context, q string, args ...any) (model.Item, 
 		return model.Item{}, apperr.Internal(err)
 	}
 	return i, nil
+}
+
+// Add reports whether the link was inserted (created) or already existed.
+func (r *Postgres) Add(ctx context.Context, userID, productID string) (model.Item, bool, error) {
+	return addOne(ctx, r.pool, userID, productID)
+}
+
+// AddMany inserts the batch in one transaction. failIndex is -1 on success;
+// when >= 0 the batch rolled back and err is that item's failure.
+func (r *Postgres) AddMany(ctx context.Context, userID string, productIDs []string) ([]model.AddResult, int, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, -1, apperr.Internal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	out := make([]model.AddResult, len(productIDs))
+	for i, productID := range productIDs {
+		item, created, err := addOne(ctx, tx, userID, productID)
+		if err != nil {
+			return nil, i, err
+		}
+		out[i] = model.AddResult{Item: item, Created: created}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, -1, apperr.Internal(err)
+	}
+	return out, -1, nil
+}
+
+// Existing reports which of productIDs the caller has already hearted.
+func (r *Postgres) Existing(ctx context.Context, userID string, productIDs []string) (map[string]bool, error) {
+	out := make(map[string]bool, len(productIDs))
+	if len(productIDs) == 0 {
+		return out, nil
+	}
+	const q = `SELECT product_id FROM wishlist_items WHERE user_id = $1 AND product_id = ANY($2)`
+	rows, err := r.pool.Query(ctx, q, userID, productIDs)
+	if err != nil {
+		return nil, apperr.Internal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, apperr.Internal(err)
+		}
+		out[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, apperr.Internal(err)
+	}
+	return out, nil
 }
 
 // ListByUser returns one filtered page of the caller's hearts plus the
@@ -137,4 +197,25 @@ func (r *Postgres) Remove(ctx context.Context, userID, productID string) error {
 		return apperr.NotFound("wishlist item not found")
 	}
 	return nil
+}
+
+// RemoveMany deletes the batch in one transaction. Missing links are not an
+// error here (bulk remove is idempotent); failIndex is -1 on success.
+func (r *Postgres) RemoveMany(ctx context.Context, userID string, productIDs []string) (int, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return -1, apperr.Internal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	const q = `DELETE FROM wishlist_items WHERE user_id = $1 AND product_id = $2`
+	for i, productID := range productIDs {
+		if _, err := tx.Exec(ctx, q, userID, productID); err != nil {
+			return i, apperr.Internal(err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return -1, apperr.Internal(err)
+	}
+	return -1, nil
 }

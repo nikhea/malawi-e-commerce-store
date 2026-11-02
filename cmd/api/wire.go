@@ -286,7 +286,7 @@ func registerRoutes(r *gin.Engine, a *app) {
 		}))
 	}
 	payments.RegisterRoutes(webhooks, protected, a.paymentsSvc)
-	wishlist.RegisterRoutes(protected, a.wishlistSvc)
+	wishlist.RegisterRoutes(protected, a.wishlistSvc, a.idemStore)
 	reviews.RegisterRoutes(open, protected, a.reviewsSvc)
 
 	// Generated API docs (docs/ is committed; refresh with

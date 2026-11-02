@@ -62,6 +62,40 @@ type UpdateReviewInput struct {
 	Body   *string
 }
 
+// MyReviewProduct is the catalog context attached to a review in the
+// caller's own history.
+type MyReviewProduct struct {
+	ID       string `json:"id"`
+	Name     string `json:"name" example:"Sunseed Cooking Oil 2L"`
+	Slug     string `json:"slug" example:"sunseed-cooking-oil-2l"`
+	ImageURL string `json:"image_url,omitempty"`
+}
+
+// MyReview is one of the caller's reviews with product context.
+type MyReview struct {
+	ID        string          `json:"id"`
+	UserID    string          `json:"user_id"`
+	ProductID string          `json:"product_id"`
+	Rating    int             `json:"rating" example:"5"`
+	Title     string          `json:"title" example:"Great oil"`
+	Body      string          `json:"body" example:"Lasted the whole month"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
+	Product   MyReviewProduct `json:"product"`
+}
+
+// MyReviewsPage is one page of the caller's reviews.
+type MyReviewsPage struct {
+	Items []MyReview
+	Meta  pagination.Meta
+}
+
+// MyReviewsResponse is the documented wire shape for GET /reviews/me.
+type MyReviewsResponse struct {
+	Data []MyReview      `json:"data"`
+	Meta pagination.Meta `json:"meta"`
+}
+
 // Service is the reviews capability surface.
 type Service interface {
 	// Create writes one review per user per product (second write is a
@@ -75,4 +109,7 @@ type Service interface {
 	DeleteAny(ctx context.Context, reviewID string) error
 	// Summary returns the public aggregate + one filtered review page.
 	Summary(ctx context.Context, productID string, f ListFilter) (Summary, error)
+	// ListMine returns the caller's reviews, newest first by default,
+	// with product context joined in.
+	ListMine(ctx context.Context, userID string, f ListFilter) (MyReviewsPage, error)
 }

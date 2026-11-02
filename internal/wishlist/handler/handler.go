@@ -1,10 +1,13 @@
 package handler
 
 import (
+	"time"
+
 	"github.com/gin-gonic/gin"
 	"github.com/nikhea/malawi-e-commerce-store/internal/wishlist/dto"
 	"github.com/nikhea/malawi-e-commerce-store/internal/wishlist/public"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/apperr"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/bulk"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/middleware"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/response"
 )
@@ -95,4 +98,73 @@ func (h *Handler) Remove(c *gin.Context) {
 		return
 	}
 	response.OK(c, gin.H{"status": "removed"})
+}
+
+// BulkAdd godoc
+// @Summary Heart products in bulk
+// @Description Max 50 product ids. Unknown or inactive products are per-item
+// @Description NOT_FOUND; already-hearted rows succeed with alreadyExists.
+// @Description Duplicate ids reject the whole request. atomic inserts every
+// @Description new link in one transaction.
+// @Tags wishlist
+// @Accept json
+// @Produce json
+// @Param Idempotency-Key header string false "Replay-safe request key (24h)"
+// @Param body body dto.BulkAddWishlistRequest true "Products"
+// @Success 200 {object} dto.BulkAddWishlistResponse
+// @Failure 400 {object} response.ErrorResponse
+// @Failure 401 {object} response.ErrorResponse
+// @Failure 404 {object} response.ErrorResponse
+// @Security BearerAuth
+// @Router /wishlist/bulk [post]
+func (h *Handler) BulkAdd(c *gin.Context) {
+	var req dto.BulkAddWishlistRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, apperr.Validation("productIds is required"))
+		return
+	}
+	started := time.Now()
+	results, err := h.svc.BulkAdd(c.Request.Context(), middleware.UserIDOf(c), req.ProductIDs, req.Atomic)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+	summary := bulk.Summary(results)
+	bulk.Log(c, "wishlist.bulk_add", started, summary)
+	response.OK(c, dto.BulkAddWishlistResponse{Results: results, Summary: summary})
+}
+
+// BulkRemove godoc
+// @Summary Unheart products in bulk
+// @Description Max 50 product ids (not wishlist row ids), matching single
+// @Description DELETE /wishlist/{id}. Unknown products are per-item NOT_FOUND;
+// @Description known-but-not-hearted rows succeed with alreadyRemoved. dryRun
+// @Description reports wouldDelete without writing; atomic removes all rows in
+// @Description one transaction.
+// @Tags wishlist
+// @Accept json
+// @Produce json
+// @Param Idempotency-Key header string false "Replay-safe request key (24h)"
+// @Param body body dto.BulkRemoveWishlistRequest true "Product ids"
+// @Success 200 {object} dto.BulkRemoveWishlistResponse
+// @Failure 400 {object} response.ErrorResponse
+// @Failure 401 {object} response.ErrorResponse
+// @Failure 404 {object} response.ErrorResponse
+// @Security BearerAuth
+// @Router /wishlist/bulk-delete [post]
+func (h *Handler) BulkRemove(c *gin.Context) {
+	var req dto.BulkRemoveWishlistRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, apperr.Validation("ids is required"))
+		return
+	}
+	started := time.Now()
+	results, err := h.svc.BulkRemove(c.Request.Context(), middleware.UserIDOf(c), req.IDs, req.Atomic, req.DryRun)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+	summary := bulk.Summary(results)
+	bulk.Log(c, "wishlist.bulk_remove", started, summary)
+	response.OK(c, dto.BulkRemoveWishlistResponse{Results: results, Summary: summary})
 }

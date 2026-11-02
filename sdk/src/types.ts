@@ -464,6 +464,22 @@ export type ListWishlistParams = {
 
 export type WishlistListResponse = Paginated<WishlistItem>;
 
+/** POST /wishlist/bulk. Field is camelCase per the API spec. */
+export type BulkAddWishlistInput = {
+  productIds: string[];
+  atomic?: boolean;
+};
+
+/** POST /wishlist/bulk-delete. Ids are product ids, not wishlist row ids. */
+export type BulkRemoveWishlistInput = {
+  ids: string[];
+  dryRun?: boolean;
+  atomic?: boolean;
+};
+
+export type BulkAddWishlistResponse = BulkResponse<WishlistItem>;
+export type BulkRemoveWishlistResponse = BulkResponse<BulkEmpty>;
+
 // ---------------------------------------------------------------------------
 // cart — /api/v1/cart (JWT)
 // ---------------------------------------------------------------------------
@@ -645,3 +661,35 @@ export type ListReviewsParams = {
 
 export type CreateReviewInput = { rating: number; title?: string; body?: string };
 export type UpdateReviewInput = { rating?: number; title?: string; body?: string };
+
+/** Catalog context attached to one of the caller's own reviews. */
+export type MyReviewProduct = {
+  id: string;
+  name: string;
+  slug: string;
+  image_url?: string;
+};
+
+/** One row of GET /reviews/me: the review plus its product context. */
+export type MyReview = {
+  id: string;
+  user_id: string;
+  product_id: string;
+  rating: number;
+  title: string;
+  body: string;
+  created_at: string;
+  updated_at: string;
+  product: MyReviewProduct;
+};
+
+export type ListMyReviewsParams = {
+  sort?: ReviewSort;
+  /** 1-based page. Wins over `offset` when both are sent. */
+  page?: number;
+  limit?: number;
+  offset?: number;
+};
+
+/** `{ data: rows, meta: counters }` — same shape as other paged reads. */
+export type MyReviewsResponse = Paginated<MyReview>;

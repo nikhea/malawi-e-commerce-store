@@ -19,6 +19,7 @@ type Repository interface {
 	Create(ctx context.Context, rev model.Review) (model.Review, error)
 	GetByID(ctx context.Context, id string) (model.Review, error)
 	ListByProduct(ctx context.Context, productID string, f model.ListFilter) ([]model.Review, int64, error)
+	ListByUser(ctx context.Context, userID string, f model.ListFilter) ([]model.MyReviewRow, int64, error)
 	Stats(ctx context.Context, productID string) (float64, int, error)
 	Update(ctx context.Context, rev model.Review) (model.Review, error)
 	Delete(ctx context.Context, id string) error
@@ -177,5 +178,52 @@ func (s *service) Summary(ctx context.Context, productID string, f public.ListFi
 	return public.Summary{
 		Average: avg, Count: count, Reviews: out,
 		Meta: pagination.NewMeta(total, limit, offset),
+	}, nil
+}
+
+// ListMine returns the caller's own reviews, newest first by default, with
+// product context joined in the repository query.
+func (s *service) ListMine(ctx context.Context, userID string, f public.ListFilter) (public.MyReviewsPage, error) {
+	if strings.TrimSpace(userID) == "" {
+		return public.MyReviewsPage{}, apperr.Validation("user id is required")
+	}
+	if f.Limit < 0 {
+		return public.MyReviewsPage{}, apperr.Validation("limit cannot be negative")
+	}
+	if f.Offset < 0 {
+		return public.MyReviewsPage{}, apperr.Validation("offset cannot be negative")
+	}
+	if f.Page < 0 {
+		return public.MyReviewsPage{}, apperr.Validation("page cannot be negative")
+	}
+	sortKey := strings.TrimSpace(f.Sort)
+	if sortKey == "" {
+		sortKey = "newest"
+	}
+	if !reviewSorts[sortKey] {
+		return public.MyReviewsPage{}, apperr.Validation("unknown sort; use newest, oldest, highest or lowest")
+	}
+	limit, offset := pagination.NormalizeWithDefault(f.Page, f.Limit, f.Offset, pagination.DefaultListLimit)
+	rows, total, err := s.repo.ListByUser(ctx, userID, model.ListFilter{
+		Sort: sortKey, Limit: limit, Offset: offset,
+	})
+	if err != nil {
+		return public.MyReviewsPage{}, err
+	}
+	out := make([]public.MyReview, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, public.MyReview{
+			ID: r.ID, UserID: r.UserID, ProductID: r.ProductID,
+			Rating: r.Rating, Title: r.Title, Body: r.Body,
+			CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+			Product: public.MyReviewProduct{
+				ID: r.ProductID, Name: r.ProductName,
+				Slug: r.ProductSlug, ImageURL: r.ProductImageURL,
+			},
+		})
+	}
+	return public.MyReviewsPage{
+		Items: out,
+		Meta:  pagination.NewMeta(total, limit, offset),
 	}, nil
 }

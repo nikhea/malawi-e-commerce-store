@@ -22,14 +22,45 @@ func newFakeRepo() *fakeRepo {
 	return &fakeRepo{links: map[string]model.Item{}}
 }
 
-func (f *fakeRepo) Add(_ context.Context, userID, productID string) (model.Item, error) {
+func (f *fakeRepo) Add(_ context.Context, userID, productID string) (model.Item, bool, error) {
 	k := userID + "|" + productID
 	if i, ok := f.links[k]; ok {
-		return i, nil // idempotent
+		return i, false, nil // idempotent
 	}
 	i := model.Item{ID: "w-" + productID, UserID: userID, ProductID: productID}
 	f.links[k] = i
-	return i, nil
+	return i, true, nil
+}
+
+func (f *fakeRepo) AddMany(ctx context.Context, userID string, productIDs []string) ([]model.AddResult, int, error) {
+	out := make([]model.AddResult, len(productIDs))
+	for i, id := range productIDs {
+		item, created, err := f.Add(ctx, userID, id)
+		if err != nil {
+			return nil, i, err
+		}
+		out[i] = model.AddResult{Item: item, Created: created}
+	}
+	return out, -1, nil
+}
+
+func (f *fakeRepo) Existing(_ context.Context, userID string, productIDs []string) (map[string]bool, error) {
+	out := make(map[string]bool, len(productIDs))
+	for _, id := range productIDs {
+		if _, ok := f.links[userID+"|"+id]; ok {
+			out[id] = true
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeRepo) RemoveMany(ctx context.Context, userID string, productIDs []string) (int, error) {
+	for i, id := range productIDs {
+		if err := f.Remove(ctx, userID, id); err != nil {
+			return i, err
+		}
+	}
+	return -1, nil
 }
 
 func (f *fakeRepo) ListByUser(_ context.Context, userID string, filter model.ListFilter) ([]model.Item, int64, error) {
@@ -60,16 +91,21 @@ func (f *fakeRepo) Remove(_ context.Context, userID, productID string) error {
 	return nil
 }
 
-// fakeProducts knows "prod-1" only.
+// fakeProducts knows "prod-1", "prod-2" and inactive "prod-off".
 type fakeProducts struct{}
 
 func (fakeProducts) detail(id string) (productspublic.Detail, error) {
-	if id != "prod-1" {
-		return productspublic.Detail{}, apperr.NotFound("product not found")
+	switch id {
+	case "prod-1", "prod-2":
+		return productspublic.Detail{
+			Product: productspublic.Product{ID: id, Name: "Oil " + id, Slug: "oil-" + id, PriceCents: 1000, Currency: "USD", IsActive: true},
+		}, nil
+	case "prod-off":
+		return productspublic.Detail{
+			Product: productspublic.Product{ID: id, Name: "Old", Slug: "old", PriceCents: 100, Currency: "USD", IsActive: false},
+		}, nil
 	}
-	return productspublic.Detail{
-		Product: productspublic.Product{ID: "prod-1", Name: "Oil", Slug: "oil", PriceCents: 1000, Currency: "USD"},
-	}, nil
+	return productspublic.Detail{}, apperr.NotFound("product not found")
 }
 
 func (f fakeProducts) Create(context.Context, productspublic.CreateProductInput) (productspublic.Product, error) {
@@ -143,7 +179,7 @@ func TestWishlist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	if item.Product.Name != "Oil" || item.Product.PriceCents != 1000 {
+	if item.Product.Name != "Oil prod-1" || item.Product.PriceCents != 1000 {
 		t.Fatalf("bad attach: %+v", item)
 	}
 	// Re-heart idempotent.
@@ -170,6 +206,229 @@ func TestWishlist(t *testing.T) {
 	if err := svc.Remove(ctx, "u1", "prod-1"); apperr.CodeOf(err) != apperr.CodeNotFound {
 		t.Fatalf("expected NOT_FOUND, got %v", err)
 	}
+}
+
+func TestBulkAdd(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("happy path", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := service.NewService(repo, fakeProducts{}, fakeUsers{})
+		results, err := svc.BulkAdd(ctx, "u1", []string{"prod-1", "prod-2"}, false)
+		if err != nil {
+			t.Fatalf("bulk add: %v", err)
+		}
+		if len(results) != 2 || results[0].Status != "ok" || results[1].Status != "ok" {
+			t.Fatalf("bad results: %+v", results)
+		}
+		if results[0].Data == nil || results[0].Data.Product.Name != "Oil prod-1" {
+			t.Fatalf("product context missing: %+v", results[0].Data)
+		}
+		if len(repo.links) != 2 {
+			t.Fatalf("expected 2 links, got %d", len(repo.links))
+		}
+	})
+
+	t.Run("already hearted", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := service.NewService(repo, fakeProducts{}, fakeUsers{})
+		if _, err := svc.Add(ctx, "u1", "prod-1"); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		results, err := svc.BulkAdd(ctx, "u1", []string{"prod-1"}, false)
+		if err != nil {
+			t.Fatalf("bulk add: %v", err)
+		}
+		if results[0].Status != "ok" || !results[0].AlreadyExists {
+			t.Fatalf("expected alreadyExists, got %+v", results[0])
+		}
+	})
+
+	t.Run("unknown and inactive are per item", func(t *testing.T) {
+		svc := service.NewService(newFakeRepo(), fakeProducts{}, fakeUsers{})
+		results, err := svc.BulkAdd(ctx, "u1", []string{"prod-1", "ghost", "prod-off"}, false)
+		if err != nil {
+			t.Fatalf("bulk add: %v", err)
+		}
+		if results[0].Status != "ok" {
+			t.Fatalf("first should succeed: %+v", results[0])
+		}
+		for _, i := range []int{1, 2} {
+			if results[i].Status != "error" || results[i].Error.Code != apperr.CodeNotFound {
+				t.Fatalf("item %d expected NOT_FOUND, got %+v", i, results[i])
+			}
+		}
+	})
+
+	t.Run("duplicates reject the batch", func(t *testing.T) {
+		svc := service.NewService(newFakeRepo(), fakeProducts{}, fakeUsers{})
+		if _, err := svc.BulkAdd(ctx, "u1", []string{"prod-1", "prod-1"}, false); apperr.CodeOf(err) != apperr.CodeDuplicateItem {
+			t.Fatalf("expected DUPLICATE_ITEM, got %v", err)
+		}
+	})
+
+	t.Run("cap enforced", func(t *testing.T) {
+		svc := service.NewService(newFakeRepo(), fakeProducts{}, fakeUsers{})
+		ids := make([]string, 51)
+		for i := range ids {
+			ids[i] = "prod-1"
+		}
+		// Duplicates are checked after the cap, so this is the cap error.
+		if _, err := svc.BulkAdd(ctx, "u1", ids, false); apperr.CodeOf(err) != apperr.CodeBulkLimitExceeded {
+			t.Fatalf("expected BULK_LIMIT_EXCEEDED, got %v", err)
+		}
+	})
+
+	t.Run("atomic rolls back", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := service.NewService(repo, fakeProducts{}, fakeUsers{})
+		results, err := svc.BulkAdd(ctx, "u1", []string{"prod-1", "ghost"}, true)
+		if err != nil {
+			t.Fatalf("bulk add: %v", err)
+		}
+		for _, r := range results {
+			if r.Status != "rolled_back" {
+				t.Fatalf("expected rolled_back, got %+v", r)
+			}
+		}
+		if results[1].Error == nil || results[1].Error.Code != apperr.CodeNotFound {
+			t.Fatalf("failing item should carry the error: %+v", results[1])
+		}
+		if len(repo.links) != 0 {
+			t.Fatalf("atomic rollback wrote links: %d", len(repo.links))
+		}
+	})
+
+	t.Run("atomic success", func(t *testing.T) {
+		repo := newFakeRepo()
+		svc := service.NewService(repo, fakeProducts{}, fakeUsers{})
+		results, err := svc.BulkAdd(ctx, "u1", []string{"prod-1", "prod-2"}, true)
+		if err != nil {
+			t.Fatalf("bulk add: %v", err)
+		}
+		for _, r := range results {
+			if r.Status != "ok" {
+				t.Fatalf("expected ok, got %+v", r)
+			}
+		}
+		if len(repo.links) != 2 {
+			t.Fatalf("expected 2 links, got %d", len(repo.links))
+		}
+	})
+}
+
+func TestBulkRemove(t *testing.T) {
+	ctx := context.Background()
+
+	seed := func(t *testing.T, productIDs ...string) (*fakeRepo, public.Service) {
+		t.Helper()
+		repo := newFakeRepo()
+		svc := service.NewService(repo, fakeProducts{}, fakeUsers{})
+		for _, id := range productIDs {
+			if _, err := svc.Add(ctx, "u1", id); err != nil {
+				t.Fatalf("seed %s: %v", id, err)
+			}
+		}
+		return repo, svc
+	}
+
+	t.Run("happy path", func(t *testing.T) {
+		repo, svc := seed(t, "prod-1", "prod-2")
+		results, err := svc.BulkRemove(ctx, "u1", []string{"prod-1", "prod-2"}, false, false)
+		if err != nil {
+			t.Fatalf("bulk remove: %v", err)
+		}
+		for _, r := range results {
+			if r.Status != "ok" || r.AlreadyRemoved {
+				t.Fatalf("expected ok, got %+v", r)
+			}
+		}
+		if len(repo.links) != 0 {
+			t.Fatalf("links left behind: %d", len(repo.links))
+		}
+	})
+
+	t.Run("unknown and empty ids are per item", func(t *testing.T) {
+		_, svc := seed(t, "prod-1")
+		results, err := svc.BulkRemove(ctx, "u1", []string{"ghost", ""}, false, false)
+		if err != nil {
+			t.Fatalf("bulk remove: %v", err)
+		}
+		if results[0].Error == nil || results[0].Error.Code != apperr.CodeNotFound {
+			t.Fatalf("unknown product expected NOT_FOUND: %+v", results[0])
+		}
+		if results[1].Error == nil || results[1].Error.Code != apperr.CodeValidation {
+			t.Fatalf("empty id expected VALIDATION_ERROR: %+v", results[1])
+		}
+	})
+
+	t.Run("already removed is idempotent", func(t *testing.T) {
+		_, svc := seed(t, "prod-1")
+		if err := svc.Remove(ctx, "u1", "prod-1"); err != nil {
+			t.Fatalf("seed remove: %v", err)
+		}
+		results, err := svc.BulkRemove(ctx, "u1", []string{"prod-1"}, false, false)
+		if err != nil {
+			t.Fatalf("bulk remove: %v", err)
+		}
+		if results[0].Status != "ok" || !results[0].AlreadyRemoved {
+			t.Fatalf("expected alreadyRemoved, got %+v", results[0])
+		}
+	})
+
+	t.Run("dry run writes nothing", func(t *testing.T) {
+		repo, svc := seed(t, "prod-1")
+		results, err := svc.BulkRemove(ctx, "u1", []string{"prod-1", "prod-2"}, false, true)
+		if err != nil {
+			t.Fatalf("dry run: %v", err)
+		}
+		if !results[0].WouldDelete || results[0].AlreadyRemoved {
+			t.Fatalf("expected wouldDelete for the hearted product: %+v", results[0])
+		}
+		if !results[1].AlreadyRemoved || results[1].WouldDelete {
+			t.Fatalf("expected alreadyRemoved for the unhearted product: %+v", results[1])
+		}
+		if len(repo.links) != 1 {
+			t.Fatalf("dry run wrote: %d links", len(repo.links))
+		}
+	})
+
+	t.Run("duplicates reject the batch", func(t *testing.T) {
+		_, svc := seed(t)
+		if _, err := svc.BulkRemove(ctx, "u1", []string{"prod-1", "prod-1"}, false, false); apperr.CodeOf(err) != apperr.CodeDuplicateItem {
+			t.Fatalf("expected DUPLICATE_ITEM, got %v", err)
+		}
+	})
+
+	t.Run("cap enforced", func(t *testing.T) {
+		_, svc := seed(t)
+		ids := make([]string, 51)
+		for i := range ids {
+			ids[i] = "prod-1"
+		}
+		if _, err := svc.BulkRemove(ctx, "u1", ids, false, false); apperr.CodeOf(err) != apperr.CodeBulkLimitExceeded {
+			t.Fatalf("expected BULK_LIMIT_EXCEEDED, got %v", err)
+		}
+	})
+
+	t.Run("atomic rolls back", func(t *testing.T) {
+		repo, svc := seed(t, "prod-1")
+		results, err := svc.BulkRemove(ctx, "u1", []string{"prod-1", "ghost"}, true, false)
+		if err != nil {
+			t.Fatalf("bulk remove: %v", err)
+		}
+		for _, r := range results {
+			if r.Status != "rolled_back" {
+				t.Fatalf("expected rolled_back, got %+v", r)
+			}
+		}
+		if results[1].Error == nil || results[1].Error.Code != apperr.CodeNotFound {
+			t.Fatalf("failing item should carry the error: %+v", results[1])
+		}
+		if len(repo.links) != 1 {
+			t.Fatalf("atomic rollback removed the link: %d", len(repo.links))
+		}
+	})
 }
 
 // Bulk admin writes are not exercised by this module's tests.

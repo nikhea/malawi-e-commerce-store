@@ -20,3 +20,10 @@ type ListFilter struct {
 	Limit      int
 	Offset     int
 }
+
+// AddResult is one insert outcome in a bulk transaction. Created is false
+// when the link already existed (the call is still a success).
+type AddResult struct {
+	Item    Item
+	Created bool
+}
