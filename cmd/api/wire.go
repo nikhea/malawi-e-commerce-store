@@ -177,7 +177,7 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 	// need notifySvc — so it slots in here, between infra and modules.
 	// AttachOrders closes the wiring cycle (notify→orders→notify):
 	// PaymentFailed mail needs order lookup, orders needs the notifier.
-	notifySvc := notify.New(riverClient, usersSvc, nil, cfg.AppURL)
+	notifySvc := notify.New(riverClient, usersSvc, nil, cfg.FrontendURL)
 	ordersSvc := orders.Wire(pool, cartSvc, inventorySvc, notifySvc)
 	// The expiry worker runs here too (same idempotent job): the sweep
 	// works with api alone, worker alone, or both — whoever is up.

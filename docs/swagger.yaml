@@ -2263,6 +2263,41 @@ paths:
       summary: List users (admin)
       tags:
       - admin
+  /admin/users/{id}:
+    get:
+      description: |-
+        Returns one account wrapped in the standard {"data"} envelope.
+        Admin-only: the public read was removed to stop PII enumeration.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.User'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get user by ID (admin)
+      tags:
+      - users
   /admin/users/{id}/role:
     patch:
       consumes:
@@ -3676,29 +3711,6 @@ paths:
       summary: List my reviews
       tags:
       - reviews
-  /users/{id}:
-    get:
-      description: Returns one account wrapped in the standard {"data"} envelope.
-      parameters:
-      - description: User ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/public.User'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/response.ErrorResponse'
-      summary: Get user by ID
-      tags:
-      - users
   /users/me:
     get:
       description: Reads identity from the JWT (no id parameter, can't spoof others).

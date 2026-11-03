@@ -20,14 +20,14 @@ import (
 // notifier ports of auth, orders, and payments (asserted at wiring by
 // assigning to each narrow interface).
 type Service struct {
-	client *river.Client[pgx.Tx]
-	users  userspublic.Service
-	orders orderspublic.Service
-	appURL string
+	client      *river.Client[pgx.Tx]
+	users       userspublic.Service
+	orders      orderspublic.Service
+	frontendURL string
 }
 
-func New(client *river.Client[pgx.Tx], users userspublic.Service, orders orderspublic.Service, appURL string) *Service {
-	return &Service{client: client, users: users, orders: orders, appURL: appURL}
+func New(client *river.Client[pgx.Tx], users userspublic.Service, orders orderspublic.Service, frontendURL string) *Service {
+	return &Service{client: client, users: users, orders: orders, frontendURL: frontendURL}
 }
 
 // AttachOrders sets the orders dependency after construction. Needed
@@ -73,7 +73,7 @@ func (s *Service) SendReset(ctx context.Context, userID, email, name, token stri
 	_ = userID
 	s.enqueue(ctx, email, "Reset your password — Malawi Store",
 		"Hi "+name+",\n\nReset your password here (valid 1 hour):\n"+
-			s.appURL+"/reset-password?token="+token+
+			s.frontendURL+"/reset-password?token="+token+
 			"\n\nDidn't ask? Ignore this mail.\n\n— Malawi Store")
 }
 
