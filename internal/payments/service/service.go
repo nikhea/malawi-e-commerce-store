@@ -165,6 +165,12 @@ func (s *service) HandleWebhook(ctx context.Context, payload []byte, sigHeader s
 	if len(payload) == 0 || strings.TrimSpace(sigHeader) == "" {
 		return apperr.Validation("invalid webhook")
 	}
+	if strings.TrimSpace(s.secret) == "" {
+		// Misconfiguration, not forgery. stripe-go happily HMACs with an
+		// empty key, which would let anyone forge a "paid" event; fail
+		// closed with 5xx so Stripe retries and the misconfig is visible.
+		return apperr.Internal(fmt.Errorf("stripe webhook secret is not configured"))
+	}
 	evt, err := s.gw.VerifyWebhook(payload, sigHeader, s.secret)
 	if err != nil {
 		// Forgery or corruption: 4xx so Stripe does NOT retry.

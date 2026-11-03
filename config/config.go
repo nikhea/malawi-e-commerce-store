@@ -126,6 +126,12 @@ func Load() (Config, error) {
 	if cfg.JWTSecret == "" {
 		return Config{}, errors.New("JWT_SECRET is required")
 	}
+	// A missing webhook secret is not a degraded mode: stripe-go HMACs
+	// with whatever string it is given, so an empty secret turns the open
+	// webhook endpoint into an order-settlement forge. Refuse to boot.
+	if strings.TrimSpace(cfg.StripeWebhookSecret) == "" {
+		return Config{}, errors.New("STRIPE_WEBHOOKS_SIGNING_SECRET is required")
+	}
 
 	return cfg, nil
 }

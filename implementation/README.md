@@ -6,7 +6,7 @@ can be reviewed and merged in order. One branch + one commit per batch.
 
 | Batch | Branch | Scope | Status |
 |---|---|---|---|
-| 1 | `fix/01-stripe-webhook-secret-guard` | Fail closed when the Stripe webhook secret is missing; 5xx for server-side misconfig | in progress |
+| 1 | `fix/01-stripe-webhook-secret-guard` | Fail closed when the Stripe webhook secret is missing; 5xx for server-side misconfig | done |
 | 2 | `fix/02-payment-stock-lifecycle` | Align reservation/session TTLs, retry stock confirm on `MarkPaid`, cancel before release | in progress |
 | 3 | `fix/03-expiry-sweep-resilience` | Sweep continues past failures, settles per order status, converges on retry | in progress |
 | 4 | `fix/04-user-pii-and-reset-link` | Remove the customer-facing `GET /users/{id}`; reset links point at the frontend | in progress |

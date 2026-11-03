@@ -240,6 +240,16 @@ func TestHandleWebhook(t *testing.T) {
 	succeeded := gateway.WebhookEvent{Type: "payment_intent.succeeded", IntentID: "pi-test", OrderRef: "order-1"}
 	failed := gateway.WebhookEvent{Type: "payment_intent.payment_failed", IntentID: "pi-test", OrderRef: "order-1"}
 
+	t.Run("missing secret fails closed", func(t *testing.T) {
+		// stripe-go HMACs with an empty key, so an unset secret is a
+		// forgery vector, not a degraded mode. It must be a 5xx (Stripe
+		// retries, the operator sees it), never a silent accept.
+		svc := service.NewService(nil, nil, nil, nil, service.Config{})
+		if err := svc.HandleWebhook(ctx, []byte("{}"), "sig"); apperr.CodeOf(err) != apperr.CodeInternal {
+			t.Fatalf("expected INTERNAL, got %v", err)
+		}
+	})
+
 	t.Run("bad signature rejected", func(t *testing.T) {
 		fx := newFixture(func([]byte, string) (gateway.WebhookEvent, error) {
 			return gateway.WebhookEvent{}, errors.New("bad sig")
