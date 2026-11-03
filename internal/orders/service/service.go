@@ -336,3 +336,32 @@ func (s *service) CancelByRef(ctx context.Context, orderRef string) error {
 	_, err = s.cancelOrder(ctx, o)
 	return err
 }
+
+// SettleExpired resolves one expired stock hold by the order's real status:
+// a pending order is cancelled (transition first, then release), a paid
+// order confirms the hold (the payment won the race with the sweep), and an
+// already cancelled order just releases. Safe to repeat, so a sweep that
+// fails halfway converges on the next run.
+func (s *service) SettleExpired(ctx context.Context, orderRef string) error {
+	if strings.TrimSpace(orderRef) == "" {
+		return apperr.Validation("order ref is required")
+	}
+	o, err := s.repo.GetByID(ctx, orderRef)
+	if err != nil {
+		if apperr.CodeOf(err) == apperr.CodeNotFound {
+			return nil // order deleted: nothing left to settle
+		}
+		return err
+	}
+	switch o.Status {
+	case public.StatusPending:
+		_, err = s.cancelOrder(ctx, o)
+		return err
+	case public.StatusPaid:
+		return s.inventory.ConfirmByOrder(ctx, o.ID)
+	case public.StatusCancelled:
+		return s.inventory.ReleaseByOrder(ctx, o.ID)
+	default:
+		return nil
+	}
+}

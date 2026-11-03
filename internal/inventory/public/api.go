@@ -60,7 +60,9 @@ type Service interface {
 	ReleaseByOrder(ctx context.Context, orderRef string) error
 	// ConfirmByOrder converts holds into sales (payment path).
 	ConfirmByOrder(ctx context.Context, orderRef string) error
-	// ReleaseExpired frees all holds past their TTL and returns the
-	// affected order refs (worker expiry sweep; orders cancels them).
-	ReleaseExpired(ctx context.Context) ([]string, error)
+	// ExpiredReservations lists order refs whose active hold is past its
+	// TTL. It does NOT settle them: the worker asks orders to settle each
+	// ref (cancel/release or confirm based on the order's real status), so
+	// a hold can never be freed while its order was paid.
+	ExpiredReservations(ctx context.Context) ([]string, error)
 }

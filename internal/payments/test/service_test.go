@@ -135,6 +135,20 @@ func (f *fakeOrders) ExtendCheckoutHold(_ context.Context, orderID string) (time
 	return time.Now().Add(orderspublic.ReserveTTL), nil
 }
 
+func (f *fakeOrders) SettleExpired(_ context.Context, ref string) error {
+	o, err := f.order(ref)
+	if err != nil {
+		return err
+	}
+	switch o.Status {
+	case orderspublic.StatusPending:
+		f.cancelled = append(f.cancelled, ref)
+	case orderspublic.StatusPaid:
+		f.paid[ref] = true
+	}
+	return nil
+}
+
 // fakeGateway returns canned intents and verifies by rule.
 type fakeGateway struct {
 	intents       int

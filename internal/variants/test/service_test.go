@@ -149,7 +149,7 @@ func (fakeInventory) ConfirmByOrder(context.Context, string) error { return nil 
 func (fakeInventory) ExtendReservation(context.Context, string, time.Duration) (time.Time, error) {
 	return time.Time{}, nil
 }
-func (fakeInventory) ReleaseExpired(context.Context) ([]string, error) {
+func (fakeInventory) ExpiredReservations(context.Context) ([]string, error) {
 	return nil, nil
 }
 

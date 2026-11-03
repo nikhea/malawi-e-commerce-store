@@ -106,4 +106,10 @@ type Service interface {
 	ExtendCheckoutHold(ctx context.Context, orderID string) (time.Time, error)
 	// CancelByRef releases stock for a ref (failed payments). Idempotent.
 	CancelByRef(ctx context.Context, orderRef string) error
+	// SettleExpired resolves a hold whose TTL passed. It is status-aware:
+	// pending orders are cancelled and released, paid orders have the hold
+	// confirmed (the payment won the race), cancelled orders just release.
+	// The worker calls it per ref; convergence relies on it being safe to
+	// repeat.
+	SettleExpired(ctx context.Context, orderRef string) error
 }

@@ -322,33 +322,28 @@ func (r *Postgres) ConfirmByOrder(ctx context.Context, orderRef string) error {
 	return r.settle(ctx, orderRef, true)
 }
 
-// ReleaseExpired frees every hold past its TTL (abandoned checkouts)
-// and returns the affected order refs for order cancellation. Each ref
-// settles in its own transaction — one poisoned ref can't block the rest.
-func (r *Postgres) ReleaseExpired(ctx context.Context) ([]string, error) {
+// ExpiredReservations lists refs with an active hold past its TTL. It does
+// not settle them: the worker asks orders to settle each ref, so the order's
+// actual status (pending/paid/cancelled) decides release vs confirm.
+func (r *Postgres) ExpiredReservations(ctx context.Context) ([]string, error) {
 	const q = `SELECT DISTINCT order_ref FROM reservations
 	           WHERE status = 'active' AND expires_at < now()`
 	rows, err := r.pool.Query(ctx, q)
 	if err != nil {
 		return nil, apperr.Internal(err)
 	}
+	defer rows.Close()
+
 	refs := []string{}
 	for rows.Next() {
 		var ref string
 		if err := rows.Scan(&ref); err != nil {
-			rows.Close()
 			return nil, apperr.Internal(err)
 		}
 		refs = append(refs, ref)
 	}
-	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, apperr.Internal(err)
-	}
-	for _, ref := range refs {
-		if err := r.settle(ctx, ref, false); err != nil {
-			return refs, err
-		}
 	}
 	return refs, nil
 }

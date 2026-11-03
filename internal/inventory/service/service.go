@@ -24,7 +24,7 @@ type Repository interface {
 	ExtendReservation(ctx context.Context, orderRef string, ttl time.Duration) (time.Time, error)
 	ReleaseByOrder(ctx context.Context, orderRef string) error
 	ConfirmByOrder(ctx context.Context, orderRef string) error
-	ReleaseExpired(ctx context.Context) ([]string, error)
+	ExpiredReservations(ctx context.Context) ([]string, error)
 }
 
 type service struct {
@@ -237,6 +237,6 @@ func (s *service) ConfirmByOrder(ctx context.Context, orderRef string) error {
 	return s.repo.ConfirmByOrder(ctx, orderRef)
 }
 
-func (s *service) ReleaseExpired(ctx context.Context) ([]string, error) {
-	return s.repo.ReleaseExpired(ctx)
+func (s *service) ExpiredReservations(ctx context.Context) ([]string, error) {
+	return s.repo.ExpiredReservations(ctx)
 }

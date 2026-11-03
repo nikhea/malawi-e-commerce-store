@@ -181,7 +181,7 @@ func (f *fakeInventory) ExtendReservation(_ context.Context, orderRef string, tt
 	return time.Now().Add(ttl), nil
 }
 
-func (f *fakeInventory) ReleaseExpired(_ context.Context) ([]string, error) {
+func (f *fakeInventory) ExpiredReservations(_ context.Context) ([]string, error) {
 	return nil, nil
 }
 
@@ -401,4 +401,66 @@ func TestExtendCheckoutHold(t *testing.T) {
 	if _, err := fx.svc.ExtendCheckoutHold(ctx, order.ID); apperr.CodeOf(err) != apperr.CodeConflict {
 		t.Fatalf("expected CONFLICT for a paid order, got %v", err)
 	}
+}
+
+func TestSettleExpired(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("pending order cancels and releases", func(t *testing.T) {
+		fx := newFixture()
+		order, err := fx.svc.Checkout(ctx, "u1")
+		if err != nil {
+			t.Fatalf("checkout: %v", err)
+		}
+		if err := fx.svc.SettleExpired(ctx, order.ID); err != nil {
+			t.Fatalf("settle: %v", err)
+		}
+		if len(fx.inventory.released) != 1 {
+			t.Fatalf("hold not released: %+v", fx.inventory.released)
+		}
+		got, err := fx.svc.GetByRef(ctx, order.ID)
+		if err != nil || got.Status != public.StatusCancelled {
+			t.Fatalf("order not cancelled: %v %+v", err, got)
+		}
+	})
+
+	t.Run("paid order confirms instead of releasing", func(t *testing.T) {
+		fx := newFixture()
+		order, err := fx.svc.Checkout(ctx, "u1")
+		if err != nil {
+			t.Fatalf("checkout: %v", err)
+		}
+		if _, err := fx.svc.MarkPaid(ctx, order.ID); err != nil {
+			t.Fatalf("pay: %v", err)
+		}
+		before := len(fx.inventory.released)
+		if err := fx.svc.SettleExpired(ctx, order.ID); err != nil {
+			t.Fatalf("settle: %v", err)
+		}
+		if len(fx.inventory.released) != before {
+			t.Fatalf("paid order released stock: %+v", fx.inventory.released)
+		}
+		// MarkPaid confirmed once; settlement confirms again (no-op in
+		// the real settle because the holds are already terminal).
+		if len(fx.inventory.confirmed) != 2 {
+			t.Fatalf("paid hold not confirmed: %+v", fx.inventory.confirmed)
+		}
+	})
+
+	t.Run("already cancelled releases idempotently", func(t *testing.T) {
+		fx := newFixture()
+		order, err := fx.svc.Checkout(ctx, "u1")
+		if err != nil {
+			t.Fatalf("checkout: %v", err)
+		}
+		if _, err := fx.svc.Cancel(ctx, "u1", order.ID); err != nil {
+			t.Fatalf("cancel: %v", err)
+		}
+		if err := fx.svc.SettleExpired(ctx, order.ID); err != nil {
+			t.Fatalf("settle: %v", err)
+		}
+		if len(fx.inventory.released) != 2 {
+			t.Fatalf("release not retried: %+v", fx.inventory.released)
+		}
+	})
 }

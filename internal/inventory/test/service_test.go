@@ -181,7 +181,7 @@ func (f *fakeRepo) ExtendReservation(_ context.Context, orderRef string, ttl tim
 	return time.Now().Add(ttl), nil
 }
 
-func (f *fakeRepo) ReleaseExpired(_ context.Context) ([]string, error) {
+func (f *fakeRepo) ExpiredReservations(_ context.Context) ([]string, error) {
 	return nil, nil
 }
 
