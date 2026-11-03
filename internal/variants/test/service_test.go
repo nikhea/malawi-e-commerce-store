@@ -146,6 +146,9 @@ func (fakeInventory) Reserve(context.Context, string, []inventorypublic.ReserveL
 }
 func (fakeInventory) ReleaseByOrder(context.Context, string) error { return nil }
 func (fakeInventory) ConfirmByOrder(context.Context, string) error { return nil }
+func (fakeInventory) ExtendReservation(context.Context, string, time.Duration) (time.Time, error) {
+	return time.Time{}, nil
+}
 func (fakeInventory) ReleaseExpired(context.Context) ([]string, error) {
 	return nil, nil
 }

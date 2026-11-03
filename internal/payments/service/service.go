@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
 	orderspublic "github.com/nikhea/malawi-e-commerce-store/internal/orders/public"
 	"github.com/nikhea/malawi-e-commerce-store/internal/payments/gateway"
@@ -40,13 +41,13 @@ type Config struct {
 }
 
 type service struct {
-	repo   Repository
-	orders orderspublic.Service
-	gw     gateway.Gateway
-	secret string
-	fxRate float64
+	repo        Repository
+	orders      orderspublic.Service
+	gw          gateway.Gateway
+	secret      string
+	fxRate      float64
 	frontendURL string
-	notify Notifier
+	notify      Notifier
 }
 
 // Notifier is the payment-outcome fan-out port. Production:
@@ -106,6 +107,12 @@ func (s *service) CreateIntent(ctx context.Context, userID, orderID string) (pub
 	if usd < stripeMinCents {
 		return public.Payment{}, apperr.Validation("order total is below the minimum charge")
 	}
+	// Keep the stock hold alive for the duration of the payment attempt;
+	// without this an intent paid near the TTL edge settles a cancelled
+	// order (customer charged, stock resold).
+	if _, err := s.orders.ExtendCheckoutHold(ctx, orderID); err != nil {
+		return public.Payment{}, err
+	}
 
 	// Retry-safe: an existing row reuses its intent (no double charge).
 	if existing, err := s.repo.GetByOrder(ctx, orderID); err == nil {
@@ -152,9 +159,17 @@ func (s *service) CreateCheckoutSession(ctx context.Context, userID, orderID str
 	if frontend == "" {
 		return public.CheckoutSession{}, apperr.Internal(fmt.Errorf("frontend URL is not configured"))
 	}
+	// The hosted page must expire before the stock hold does. Extend the
+	// hold, then cap the session at CheckoutSessionTTL (ReserveTTL is
+	// longer by design, leaving the webhook a buffer after expiry).
+	if _, err := s.orders.ExtendCheckoutHold(ctx, orderID); err != nil {
+		return public.CheckoutSession{}, err
+	}
+	expiresAt := time.Now().Add(orderspublic.CheckoutSessionTTL)
 	cs, err := s.gw.CreateCheckoutSession(ctx, usd, chargeCurrency, orderID,
 		frontend+"/orders/"+orderID+"/payment/success",
-		frontend+"/orders/"+orderID+"/payment/cancel")
+		frontend+"/orders/"+orderID+"/payment/cancel",
+		expiresAt)
 	if err != nil {
 		return public.CheckoutSession{}, apperr.Internal(err)
 	}

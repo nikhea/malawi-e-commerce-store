@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/stripe/stripe-go/v82"
 	"github.com/stripe/stripe-go/v82/checkout/session"
@@ -38,7 +39,7 @@ type WebhookEvent struct {
 // Gateway talks to the payment provider.
 type Gateway interface {
 	CreateIntent(ctx context.Context, amountCents int64, currency, orderID string) (Intent, error)
-	CreateCheckoutSession(ctx context.Context, amountCents int64, currency, orderID, successURL, cancelURL string) (CheckoutSession, error)
+	CreateCheckoutSession(ctx context.Context, amountCents int64, currency, orderID, successURL, cancelURL string, expiresAt time.Time) (CheckoutSession, error)
 	VerifyWebhook(payload []byte, sigHeader, webhookSecret string) (WebhookEvent, error)
 }
 
@@ -69,13 +70,16 @@ func (g *StripeGateway) CreateIntent(_ context.Context, amountCents int64, curre
 	return Intent{ID: pi.ID, ClientSecret: pi.ClientSecret}, nil
 }
 
-func (g *StripeGateway) CreateCheckoutSession(_ context.Context, amountCents int64, currency, orderID, successURL, cancelURL string) (CheckoutSession, error) {
+func (g *StripeGateway) CreateCheckoutSession(_ context.Context, amountCents int64, currency, orderID, successURL, cancelURL string, expiresAt time.Time) (CheckoutSession, error) {
 	params := &stripe.CheckoutSessionParams{
 		Mode:              stripe.String(string(stripe.CheckoutSessionModePayment)),
 		SuccessURL:        stripe.String(successURL),
 		CancelURL:         stripe.String(cancelURL),
 		ClientReferenceID: stripe.String(orderID),
 		Metadata:          map[string]string{"order_id": orderID},
+		// Never let the hosted page outlive the stock hold: the caller
+		// passes the hold deadline. Stripe accepts 30m–24h from creation.
+		ExpiresAt: stripe.Int64(expiresAt.Unix()),
 		LineItems: []*stripe.CheckoutSessionLineItemParams{
 			{
 				PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{

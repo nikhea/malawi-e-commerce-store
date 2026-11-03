@@ -21,6 +21,7 @@ type Repository interface {
 	ListStockByProduct(ctx context.Context, productID string) ([]model.Stock, error)
 	ListStockByVariantIDs(ctx context.Context, variantIDs []string) ([]model.Stock, error)
 	Reserve(ctx context.Context, orderRef string, lines []model.Reservation, expiresAt time.Time) error
+	ExtendReservation(ctx context.Context, orderRef string, ttl time.Duration) (time.Time, error)
 	ReleaseByOrder(ctx context.Context, orderRef string) error
 	ConfirmByOrder(ctx context.Context, orderRef string) error
 	ReleaseExpired(ctx context.Context) ([]string, error)
@@ -210,6 +211,16 @@ func (s *service) Reserve(ctx context.Context, orderRef string, lines []public.R
 		})
 	}
 	return s.repo.Reserve(ctx, orderRef, reservations, time.Now().Add(ttl))
+}
+
+func (s *service) ExtendReservation(ctx context.Context, orderRef string, ttl time.Duration) (time.Time, error) {
+	if strings.TrimSpace(orderRef) == "" {
+		return time.Time{}, apperr.Validation("order ref is required")
+	}
+	if ttl <= 0 {
+		return time.Time{}, apperr.Validation("ttl must be positive")
+	}
+	return s.repo.ExtendReservation(ctx, orderRef, ttl)
 }
 
 func (s *service) ReleaseByOrder(ctx context.Context, orderRef string) error {

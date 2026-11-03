@@ -17,6 +17,17 @@ const (
 	StatusCancelled = "cancelled"
 )
 
+// CheckoutSessionTTL is how long a Stripe-hosted Checkout session stays
+// payable. Stripe requires 30m–24h from session creation; the extra minute
+// keeps us clear of clock-skew rejections at the lower bound.
+const CheckoutSessionTTL = 31 * time.Minute
+
+// ReserveTTL is the stock-hold lifetime. It outlives CheckoutSessionTTL so
+// a payment made in the session's final seconds still has a live hold when
+// the webhook arrives; the expiry sweep only sees genuinely abandoned
+// checkouts.
+const ReserveTTL = CheckoutSessionTTL + 10*time.Minute
+
 // OrderLine is the legal record of one purchased line — snapshotted from
 // the cart at checkout, immune to later catalog or cart changes.
 type OrderLine struct {
@@ -89,6 +100,10 @@ type Service interface {
 	// MarkPaid confirms stock and notifies OrderPaid. For payments.
 	// Idempotent: paying twice succeeds (webhook retries demand it).
 	MarkPaid(ctx context.Context, orderRef string) (Order, error)
+	// ExtendCheckoutHold refreshes a pending order's stock hold to the
+	// reservation TTL and returns the new deadline. Called when a hosted
+	// checkout session is created so the hold outlives the session.
+	ExtendCheckoutHold(ctx context.Context, orderID string) (time.Time, error)
 	// CancelByRef releases stock for a ref (failed payments). Idempotent.
 	CancelByRef(ctx context.Context, orderRef string) error
 }

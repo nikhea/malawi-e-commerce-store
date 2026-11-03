@@ -20,6 +20,9 @@ type fakeRepo struct {
 	orders map[string]model.Order
 	items  map[string][]model.Item
 	seq    int
+	// onCancel runs inside Cancel, before the transition is applied. Tests
+	// use it to prove side effects happen after the status is claimed.
+	onCancel func(id string)
 }
 
 func newFakeRepo() *fakeRepo {
@@ -84,6 +87,9 @@ func (f *fakeRepo) MarkPaid(_ context.Context, id string) (model.Order, error) {
 }
 
 func (f *fakeRepo) Cancel(_ context.Context, id string) (model.Order, error) {
+	if f.onCancel != nil {
+		f.onCancel(id)
+	}
 	return f.transition(id, public.StatusCancelled)
 }
 
@@ -135,6 +141,7 @@ type fakeInventory struct {
 	reserved    []string
 	released    []string
 	confirmed   []string
+	extended    []string
 	failReserve bool
 }
 
@@ -169,12 +176,18 @@ func (f *fakeInventory) ConfirmByOrder(_ context.Context, orderRef string) error
 	return nil
 }
 
+func (f *fakeInventory) ExtendReservation(_ context.Context, orderRef string, ttl time.Duration) (time.Time, error) {
+	f.extended = append(f.extended, orderRef)
+	return time.Now().Add(ttl), nil
+}
+
 func (f *fakeInventory) ReleaseExpired(_ context.Context) ([]string, error) {
 	return nil, nil
 }
 
 type fixture struct {
 	svc       public.Service
+	repo      *fakeRepo
 	cart      *fakeCart
 	inventory *fakeInventory
 	notify    *fakeNotifier
@@ -200,8 +213,9 @@ func (f *fakeNotifier) OrderCancelled(_ context.Context, o public.Order) {
 }
 
 func newFixture() *fixture {
-	fx := &fixture{cart: &fakeCart{}, inventory: &fakeInventory{}, notify: &fakeNotifier{}}
-	fx.svc = service.NewService(newFakeRepo(), fx.cart, fx.inventory, fx.notify, service.Config{})
+	repo := newFakeRepo()
+	fx := &fixture{repo: repo, cart: &fakeCart{}, inventory: &fakeInventory{}, notify: &fakeNotifier{}}
+	fx.svc = service.NewService(repo, fx.cart, fx.inventory, fx.notify, service.Config{})
 	return fx
 }
 
@@ -312,9 +326,13 @@ func TestPayCancel(t *testing.T) {
 	if len(fx.inventory.confirmed) != 1 || len(fx.notify.paid) != 1 || fx.notify.paid[0] != order.ID {
 		t.Fatalf("pay side effects wrong: %+v %+v", fx.inventory.confirmed, fx.notify.paid)
 	}
-	// Repeat pay succeeds (idempotent).
+	// Repeat pay succeeds (idempotent) and re-runs the stock confirm: a
+	// first attempt may have flipped the order and crashed before settling.
 	if _, err := fx.svc.MarkPaid(ctx, order.ID); err != nil {
 		t.Fatalf("repeat pay: %v", err)
+	}
+	if len(fx.inventory.confirmed) != 2 {
+		t.Fatalf("repeat pay must re-confirm stock: %+v", fx.inventory.confirmed)
 	}
 	// Paid order can't cancel.
 	if _, err := fx.svc.Cancel(ctx, "u1", order.ID); apperr.CodeOf(err) != apperr.CodeConflict {
@@ -332,5 +350,55 @@ func TestPayCancel(t *testing.T) {
 	}
 	if len(fx.inventory.released) != 1 {
 		t.Fatalf("release missing: %+v", fx.inventory.released)
+	}
+}
+
+func TestCancelClaimsTransitionBeforeRelease(t *testing.T) {
+	ctx := context.Background()
+	fx := newFixture()
+	order, err := fx.svc.Checkout(ctx, "u1")
+	if err != nil {
+		t.Fatalf("checkout: %v", err)
+	}
+	fx.repo.onCancel = func(string) {
+		// The guarded pending → cancelled claim must happen before stock is
+		// freed; otherwise a concurrent MarkPaid can leave a paid order
+		// with released stock.
+		if len(fx.inventory.released) != 0 {
+			t.Errorf("stock released before the order transition was claimed")
+		}
+	}
+	if _, err := fx.svc.Cancel(ctx, "u1", order.ID); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if len(fx.inventory.released) != 1 {
+		t.Fatalf("release missing: %+v", fx.inventory.released)
+	}
+}
+
+func TestExtendCheckoutHold(t *testing.T) {
+	ctx := context.Background()
+	fx := newFixture()
+	order, err := fx.svc.Checkout(ctx, "u1")
+	if err != nil {
+		t.Fatalf("checkout: %v", err)
+	}
+	deadline, err := fx.svc.ExtendCheckoutHold(ctx, order.ID)
+	if err != nil {
+		t.Fatalf("extend: %v", err)
+	}
+	if len(fx.inventory.extended) != 1 || fx.inventory.extended[0] != order.ID {
+		t.Fatalf("hold not extended: %+v", fx.inventory.extended)
+	}
+	if time.Until(deadline) <= 0 {
+		t.Fatalf("deadline not in the future: %v", deadline)
+	}
+
+	// Paid orders are terminal: no hold to extend.
+	if _, err := fx.svc.MarkPaid(ctx, order.ID); err != nil {
+		t.Fatalf("pay: %v", err)
+	}
+	if _, err := fx.svc.ExtendCheckoutHold(ctx, order.ID); apperr.CodeOf(err) != apperr.CodeConflict {
+		t.Fatalf("expected CONFLICT for a paid order, got %v", err)
 	}
 }

@@ -174,6 +174,13 @@ func (f *fakeRepo) ConfirmByOrder(_ context.Context, orderRef string) error {
 	return f.settle(orderRef, true)
 }
 
+func (f *fakeRepo) ExtendReservation(_ context.Context, orderRef string, ttl time.Duration) (time.Time, error) {
+	if len(f.holds[orderRef]) == 0 {
+		return time.Time{}, apperr.Conflict("no active reservation")
+	}
+	return time.Now().Add(ttl), nil
+}
+
 func (f *fakeRepo) ReleaseExpired(_ context.Context) ([]string, error) {
 	return nil, nil
 }

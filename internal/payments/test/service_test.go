@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	orderspublic "github.com/nikhea/malawi-e-commerce-store/internal/orders/public"
 	"github.com/nikhea/malawi-e-commerce-store/internal/payments/gateway"
@@ -64,6 +65,7 @@ type fakeOrders struct {
 	paid      map[string]bool
 	markPaid  []string
 	cancelled []string
+	extended  []string
 }
 
 func newFakeOrders() *fakeOrders {
@@ -121,10 +123,23 @@ func (f *fakeOrders) CancelByRef(_ context.Context, ref string) error {
 	return nil
 }
 
+func (f *fakeOrders) ExtendCheckoutHold(_ context.Context, orderID string) (time.Time, error) {
+	o, err := f.order(orderID)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if o.Status != orderspublic.StatusPending {
+		return time.Time{}, apperr.Conflict("order is not pending")
+	}
+	f.extended = append(f.extended, orderID)
+	return time.Now().Add(orderspublic.ReserveTTL), nil
+}
+
 // fakeGateway returns canned intents and verifies by rule.
 type fakeGateway struct {
-	intents int
-	verify  func(payload []byte, sig string) (gateway.WebhookEvent, error)
+	intents       int
+	sessionExpiry time.Time
+	verify        func(payload []byte, sig string) (gateway.WebhookEvent, error)
 }
 
 func (f *fakeGateway) CreateIntent(_ context.Context, amountCents int64, currency, orderID string) (gateway.Intent, error) {
@@ -132,8 +147,9 @@ func (f *fakeGateway) CreateIntent(_ context.Context, amountCents int64, currenc
 	return gateway.Intent{ID: "pi-test", ClientSecret: "secret-test"}, nil
 }
 
-func (f *fakeGateway) CreateCheckoutSession(_ context.Context, amountCents int64, currency, orderID, successURL, cancelURL string) (gateway.CheckoutSession, error) {
-	return gateway.CheckoutSession{ID: "cs-test", URL: "https://checkout.stripe.test/cs-test", ExpiresAt: 1}, nil
+func (f *fakeGateway) CreateCheckoutSession(_ context.Context, amountCents int64, currency, orderID, successURL, cancelURL string, expiresAt time.Time) (gateway.CheckoutSession, error) {
+	f.sessionExpiry = expiresAt
+	return gateway.CheckoutSession{ID: "cs-test", URL: "https://checkout.stripe.test/cs-test", ExpiresAt: expiresAt.Unix()}, nil
 }
 
 func (f *fakeGateway) VerifyWebhook(payload []byte, sig, _ string) (gateway.WebhookEvent, error) {
@@ -165,7 +181,9 @@ func (f *fakeNotifier) PaymentFailed(_ context.Context, p public.Payment) {
 func newFixture(verify func([]byte, string) (gateway.WebhookEvent, error)) *fixture {
 	fx := &fixture{repo: newFakeRepo(), orders: newFakeOrders(), gw: &fakeGateway{}, notify: &fakeNotifier{}}
 	fx.gw.verify = verify
-	fx.svc = service.NewService(fx.repo, fx.orders, fx.gw, fx.notify, service.Config{WebhookSecret: "whsec", FXMWKPerUSD: 1700})
+	fx.svc = service.NewService(fx.repo, fx.orders, fx.gw, fx.notify, service.Config{
+		WebhookSecret: "whsec", FXMWKPerUSD: 1700, FrontendURL: "http://shop.test",
+	})
 	return fx
 }
 
@@ -233,6 +251,33 @@ func TestCreateIntent(t *testing.T) {
 			t.Fatalf("expected NOT_FOUND, got %v", err)
 		}
 	})
+}
+
+func TestCreateCheckoutSession(t *testing.T) {
+	ctx := context.Background()
+	fx := newFixture(nil)
+
+	cs, err := fx.svc.CreateCheckoutSession(ctx, "u1", "order-1")
+	if err != nil {
+		t.Fatalf("session: %v", err)
+	}
+	if cs.ID != "cs-test" || cs.URL == "" {
+		t.Fatalf("bad session: %+v", cs)
+	}
+	// The hold is refreshed before the session exists...
+	if len(fx.orders.extended) != 1 || fx.orders.extended[0] != "order-1" {
+		t.Fatalf("hold not extended: %+v", fx.orders.extended)
+	}
+	// ...and the session expires before the hold does, so a payment in the
+	// final seconds still finds live stock.
+	if orderspublic.CheckoutSessionTTL >= orderspublic.ReserveTTL {
+		t.Fatalf("session TTL %v must be shorter than reserve TTL %v",
+			orderspublic.CheckoutSessionTTL, orderspublic.ReserveTTL)
+	}
+	window := time.Until(fx.gw.sessionExpiry)
+	if window < orderspublic.CheckoutSessionTTL-time.Minute || window > orderspublic.CheckoutSessionTTL+time.Minute {
+		t.Fatalf("session expiry %v not aligned to %v", window, orderspublic.CheckoutSessionTTL)
+	}
 }
 
 func TestHandleWebhook(t *testing.T) {

@@ -218,6 +218,42 @@ func (r *Postgres) Reserve(ctx context.Context, orderRef string, lines []model.R
 	return nil
 }
 
+// ExtendReservation slides every active hold for orderRef to now+ttl.
+// Payments calls it when a session or intent is created: the hold must not
+// expire while the customer can still pay. No active hold = CONFLICT (the
+// order was already settled or swept).
+func (r *Postgres) ExtendReservation(ctx context.Context, orderRef string, ttl time.Duration) (time.Time, error) {
+	const q = `UPDATE reservations
+	           SET expires_at = now() + make_interval(secs => $2)
+	           WHERE order_ref = $1 AND status = 'active'
+	           RETURNING expires_at`
+	rows, err := r.pool.Query(ctx, q, orderRef, ttl.Seconds())
+	if err != nil {
+		return time.Time{}, apperr.Internal(err)
+	}
+	defer rows.Close()
+
+	var deadline time.Time
+	extended := 0
+	for rows.Next() {
+		var exp time.Time
+		if err := rows.Scan(&exp); err != nil {
+			return time.Time{}, apperr.Internal(err)
+		}
+		if exp.After(deadline) {
+			deadline = exp
+		}
+		extended++
+	}
+	if err := rows.Err(); err != nil {
+		return time.Time{}, apperr.Internal(err)
+	}
+	if extended == 0 {
+		return time.Time{}, apperr.Conflict("no active reservation")
+	}
+	return deadline, nil
+}
+
 // settle moves an order's ACTIVE holds to a terminal status, adjusting
 // counters accordingly. confirm=true sells (on_hand down), false releases.
 // Idempotent: no active holds is a success (webhook retries demand it).

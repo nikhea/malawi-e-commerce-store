@@ -53,6 +53,9 @@ type Service interface {
 	// Reserve holds qty for orderRef for ttl. Fails with CONFLICT when
 	// any line lacks availability. Atomic: all lines or none.
 	Reserve(ctx context.Context, orderRef string, lines []ReserveLine, ttl time.Duration) error
+	// ExtendReservation pushes every active hold for orderRef to now+ttl
+	// and returns the new deadline. CONFLICT when no hold is active.
+	ExtendReservation(ctx context.Context, orderRef string, ttl time.Duration) (time.Time, error)
 	// Release frees an order's active holds (cancel/expire path).
 	ReleaseByOrder(ctx context.Context, orderRef string) error
 	// ConfirmByOrder converts holds into sales (payment path).

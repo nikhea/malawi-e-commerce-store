@@ -50,7 +50,7 @@ type service struct {
 func NewService(repo Repository, cart cartpublic.Service, inventory inventorypublic.Service, notify Notifier, cfg Config) public.Service {
 	ttl := cfg.ReserveTTL
 	if ttl <= 0 {
-		ttl = 15 * time.Minute
+		ttl = public.ReserveTTL
 	}
 	return &service{repo: repo, cart: cart, inventory: inventory, notify: notify, ttl: ttl}
 }
@@ -236,16 +236,26 @@ func (s *service) Cancel(ctx context.Context, userID, orderID string) (public.Or
 
 func (s *service) cancelOrder(ctx context.Context, o model.Order) (public.Order, error) {
 	if o.Status == public.StatusCancelled {
-		return s.view(ctx, o) // idempotent
+		// Idempotent, but still release: an earlier attempt may have won
+		// the transition and crashed before freeing the hold.
+		if err := s.inventory.ReleaseByOrder(ctx, o.ID); err != nil {
+			return public.Order{}, err
+		}
+		return s.view(ctx, o)
 	}
 	if o.Status != public.StatusPending {
 		return public.Order{}, apperr.Conflict("order is not pending")
 	}
-	if err := s.inventory.ReleaseByOrder(ctx, o.ID); err != nil {
-		return public.Order{}, err
-	}
+	// Claim the transition BEFORE releasing stock. If a concurrent MarkPaid
+	// already won pending → paid, Cancel fails and we must not free a hold
+	// for a paid order.
 	cancelled, err := s.repo.Cancel(ctx, o.ID)
 	if err != nil {
+		return public.Order{}, err
+	}
+	if err := s.inventory.ReleaseByOrder(ctx, o.ID); err != nil {
+		// The order is cancelled; a retry takes the idempotent branch above
+		// and releases the hold then.
 		return public.Order{}, err
 	}
 	view, err := s.view(ctx, cancelled)
@@ -269,7 +279,13 @@ func (s *service) MarkPaid(ctx context.Context, orderRef string) (public.Order, 
 	}
 	switch o.Status {
 	case public.StatusPaid:
-		return s.view(ctx, o) // idempotent repeat
+		// Idempotent repeat — but re-run the confirm: a previous attempt
+		// could have flipped the order and crashed before settling stock.
+		// ConfirmByOrder is a no-op when there are no active holds.
+		if err := s.inventory.ConfirmByOrder(ctx, o.ID); err != nil {
+			return public.Order{}, err
+		}
+		return s.view(ctx, o)
 	case public.StatusCancelled:
 		return public.Order{}, apperr.Conflict("order is cancelled")
 	case public.StatusPending:
@@ -291,6 +307,22 @@ func (s *service) MarkPaid(ctx context.Context, orderRef string) (public.Order, 
 	}
 	s.notify.OrderPaid(ctx, view)
 	return view, nil
+}
+
+// ExtendCheckoutHold refreshes the hold for a pending order. Payments calls
+// it when a hosted session is created so the hold cannot expire mid-payment.
+func (s *service) ExtendCheckoutHold(ctx context.Context, orderID string) (time.Time, error) {
+	if strings.TrimSpace(orderID) == "" {
+		return time.Time{}, apperr.Validation("order id is required")
+	}
+	o, err := s.repo.GetByID(ctx, orderID)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if o.Status != public.StatusPending {
+		return time.Time{}, apperr.Conflict("order is not pending")
+	}
+	return s.inventory.ExtendReservation(ctx, o.ID, s.ttl)
 }
 
 func (s *service) CancelByRef(ctx context.Context, orderRef string) error {
