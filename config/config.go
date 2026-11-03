@@ -39,7 +39,10 @@ type Config struct {
 	// assigns the admin role to these addresses. Comma-separated.
 	AdminEmails []string
 
-	EmailService  string
+	// EmailHost/EmailPort address the SMTP relay. Defaults are Gmail's
+	// submission endpoint; set them for any other provider.
+	EmailHost     string
+	EmailPort     int
 	EmailAddress  string
 	EmailPassword string
 
@@ -49,19 +52,14 @@ type Config struct {
 	CloudAPISecret         string
 	CloudinaryUploadPreset string
 
-	StripeSecretKey      string
-	StripePublishableKey string
-	StripeWebhookSecret  string
-	StripePricePro       string
-	StripePriceScale     string
+	StripeSecretKey     string
+	StripeWebhookSecret string
 
 	// FXMWKPerUSD converts legacy MWK tambala orders to USD cents for
 	// Stripe, which cannot charge MWK. New orders are USD and bypass this
 	// rate. Approximate, env-overridable; a real FX provider plugs in here
 	// when volumes justify it.
 	FXMWKPerUSD float64
-
-	QRSigningSecret string
 
 	// MaxBulkItems caps every bulk request (MAX_BULK_ITEMS, default 50).
 	// Individual endpoints may enforce a lower cap.
@@ -83,7 +81,7 @@ func Load() (Config, error) {
 		RedisHost:              envOr("REDIS_HOST", "localhost"),
 		RedisPassword:          os.Getenv("REDIS_PASSWORD"),
 		JWTSecret:              os.Getenv("JWT_SECRET"),
-		EmailService:           envOr("EMAIL_SERVICE", "Gmail"),
+		EmailHost:              envOr("EMAIL_HOST", "smtp.gmail.com"),
 		EmailAddress:           os.Getenv("EMAIL_ADDRESS"),
 		EmailPassword:          os.Getenv("EMAIL_PASSWORD"),
 		CloudinaryURL:          os.Getenv("CLOUDINARY_URL"),
@@ -92,11 +90,7 @@ func Load() (Config, error) {
 		CloudAPISecret:         os.Getenv("CLOUD_API_SECRET"),
 		CloudinaryUploadPreset: os.Getenv("CLOUDINARY_UPLOAD_PRESET"),
 		StripeSecretKey:        os.Getenv("STRIPE_SECRET_KEY"),
-		StripePublishableKey:   os.Getenv("NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY"),
 		StripeWebhookSecret:    os.Getenv("STRIPE_WEBHOOKS_SIGNING_SECRET"),
-		StripePricePro:         os.Getenv("STRIPE_PRICE_PRO"),
-		StripePriceScale:       os.Getenv("STRIPE_PRICE_SCALE"),
-		QRSigningSecret:        os.Getenv("QR_SIGNING_SECRET"),
 	}
 
 	var err error
@@ -115,16 +109,27 @@ func Load() (Config, error) {
 	if cfg.MaxBulkItems <= 0 {
 		return Config{}, errors.New("MAX_BULK_ITEMS must be positive")
 	}
-	if cfg.FXMWKPerUSD, err = envFloatOr("FX_MWK_PER_USD", 1700); err != nil || cfg.FXMWKPerUSD <= 0 {
+	if cfg.EmailPort, err = envIntOr("EMAIL_PORT", 587); err != nil {
+		return Config{}, fmt.Errorf("invalid EMAIL_PORT: %w", err)
+	}
+	if cfg.FXMWKPerUSD, err = envFloatOr("FX_MWK_PER_USD", 1700); err != nil {
 		return Config{}, fmt.Errorf("invalid FX_MWK_PER_USD: %w", err)
+	}
+	// Non-positive (not just unparseable) would divide by zero converting
+	// legacy MWK orders. %w needs a real error — passing the parse error
+	// here printed "%!w(<nil>)".
+	if cfg.FXMWKPerUSD <= 0 {
+		return Config{}, errors.New("FX_MWK_PER_USD must be positive")
 	}
 	cfg.AdminEmails = envList("ADMIN_EMAILS")
 
 	if cfg.DatabaseURL == "" {
 		return Config{}, errors.New("DATABASE_URL is required")
 	}
-	if cfg.JWTSecret == "" {
-		return Config{}, errors.New("JWT_SECRET is required")
+	// HS256 security scales with key entropy; a short secret is brute-forceable
+	// offline from any captured token.
+	if len(cfg.JWTSecret) < 32 {
+		return Config{}, errors.New("JWT_SECRET must be at least 32 bytes")
 	}
 	// A missing webhook secret is not a degraded mode: stripe-go HMACs
 	// with whatever string it is given, so an empty secret turns the open

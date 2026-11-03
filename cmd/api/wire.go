@@ -151,7 +151,7 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 	// Mail worker registered (not just the worker binary): River REQUIRES
 	// the kind in the inserting client's bundle, so the API must know it
 	// too. Either process may deliver; River still runs each job once.
-	sender := mail.NewSMTPSender("smtp.gmail.com", 587, cfg.EmailAddress, cfg.EmailPassword, cfg.EmailAddress)
+	sender := mail.NewSMTPSender(cfg.EmailHost, cfg.EmailPort, cfg.EmailAddress, cfg.EmailPassword, cfg.EmailAddress)
 	river.AddWorker(workers, jobs.NewSendMailWorker(sender))
 	// Completion callbacks: the worker calls these after a successful
 	// upload. New image owners add one RegisterComplete line here.
@@ -169,9 +169,6 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 		func(ctx context.Context, ownerID, url, publicID string) error {
 			return productsSvc.CompleteImage(ctx, ownerID, url, publicID)
 		})
-	if err := riverClient.Start(ctx); err != nil {
-		return nil, fmt.Errorf("river start: %w", err)
-	}
 
 	// notifySvc needs the River client (above); ordersSvc and the rest
 	// need notifySvc — so it slots in here, between infra and modules.
@@ -182,6 +179,15 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 	// The expiry worker runs here too (same idempotent job): the sweep
 	// works with api alone, worker alone, or both — whoever is up.
 	river.AddWorker(workers, jobs.NewExpireReservationsWorker(inventorySvc, ordersSvc))
+
+	// EVERY worker must be registered before Start: the producer reads the
+	// worker map live when dispatching, so adding one after Start is an
+	// unsynchronized map write during traffic (fatal: concurrent map read
+	// and map write). cmd/worker/main.go already has the right order.
+	if err := riverClient.Start(ctx); err != nil {
+		return nil, fmt.Errorf("river start: %w", err)
+	}
+
 	paymentsSvc := payments.Wire(pool, ordersSvc,
 		paymentsgateway.NewStripeGateway(cfg.StripeSecretKey), notifySvc,
 		cfg.StripeWebhookSecret, cfg.FXMWKPerUSD, cfg.AppURL)

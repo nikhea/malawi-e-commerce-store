@@ -43,7 +43,12 @@ func Parse(tokenStr, secret string) (public.Claims, error) {
 	if role != string(userspublic.RoleAdmin) && role != string(userspublic.RoleCustomer) {
 		return public.Claims{}, errors.New("invalid role claim")
 	}
-	exp, _ := c["exp"].(float64)
+	// jwt-go only validates exp when present, so a token minted without
+	// one would never expire. Require it explicitly.
+	exp, ok := c["exp"].(float64)
+	if !ok || exp <= 0 {
+		return public.Claims{}, errors.New("missing exp claim")
+	}
 	sub, _ := c["sub"].(string)
 	email, _ := c["email"].(string)
 	if sub == "" || email == "" {

@@ -142,14 +142,16 @@ Copy `.env.example` → `.env` for local dev. Keys:
 
 | Key | Purpose |
 |-----|---------|
-| `APP_PORT`, `APP_URL` | Listen port / public base URL (`:8080`) |
+| `APP_PORT`, `APP_URL` | Listen port / public API base URL (`:8080`) |
+| `FRONTEND_URL` | Storefront origin: CORS allowlist, checkout return URLs, password-reset links |
 | `DATABASE_URL` | Postgres DSN (`postgresql://…?sslmode=disable` locally) |
 | `REDIS_URL`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_DB` | Cache/sessions/rate-limit, local `redis://localhost:6379/0` |
-| `JWT_SECRET`, `JWT_TTL_HOURS` | Auth signing key + TTL |
-| `EMAIL_SERVICE`, `EMAIL_ADDRESS`, `EMAIL_PASSWORD` | SMTP/app-password for transactional mail |
+| `JWT_SECRET`, `JWT_TTL_HOURS` | Auth signing key (min 32 bytes, enforced at load) + TTL |
+| `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_ADDRESS`, `EMAIL_PASSWORD` | SMTP relay (default `smtp.gmail.com:587`) + app password for transactional mail |
 | `CLOUDINARY_URL`, `CLOUD_NAME`, `CLOUD_API_KEY`, `CLOUD_API_SECRET`, `CLOUDINARY_UPLOAD_PRESET` | Media uploads |
-| `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOKS_SIGNING_SECRET`, `STRIPE_PRICE_PRO`, `STRIPE_PRICE_SCALE` | Payments, plans, webhook verification |
-| `QR_SIGNING_SECRET` | Signed QR payloads |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOKS_SIGNING_SECRET` | Payments + webhook signature verification (both required) |
+| `FX_MWK_PER_USD` | Legacy MWK→USD conversion rate for Stripe charges |
+| `MAX_BULK_ITEMS`, `ADMIN_EMAILS` | Bulk request cap (default 50) / bootstrap admin addresses |
 
 Local Stripe webhooks:
 `stripe listen --forward-to localhost:8080/api/v1/webhooks/stripe --events checkout.session.completed,customer.subscription.created,customer.subscription.updated,customer.subscription.deleted,invoice.payment_succeeded,invoice.payment_failed`
@@ -256,6 +258,7 @@ enforces this at build time).
 - Review fix 3 — expiry sweep (this change): inventory exposes `ExpiredReservations` (list only, never settles) and orders exposes `SettleExpired`, which is status-aware — pending cancels then releases, paid confirms the hold, cancelled releases. The worker keeps going after a bad ref and returns `errors.Join`, so a single poisoned order cannot strand the rest; a failed ref is still expired on the next run because nothing was settled early.
 - Review fix 4 — PII + reset link (this change): the customer-facing `GET /users/{id}` is gone (it returned email/role/verified for any account to any logged-in caller); owners use `/users/me`, admins keep `/admin/users/{id}`. Password-reset mail now builds its link from `FRONTEND_URL`, not the API origin, so the `/reset-password` page is reachable.
 - Review fix 5 — auth/idempotency hardening (this change): refresh rotation is a compare-and-swap (`WHERE id = $1 AND revoked_at IS NULL`); the loser of a concurrent refresh revokes the replacement it just minted and the user's whole chain, answering `UNAUTHORIZED` (treated as reuse theft). `ConsumeReset` locks the row `FOR UPDATE` inside a transaction and `CreateReset` is transactional, so a token cannot be spent twice. Carts reject a second currency (empty carts exempt, bulk reports it per line) and `UpsertItem` refreshes `currency` on conflict. `pkg/middleware.BodyLimit` caps JSON at 1 MiB and multipart at 210 MiB globally; the idempotency middleware caps what it buffers at 1 MiB and holds a 30s Redis SETNX lock so concurrent duplicates get 409 instead of executing twice.
+- Review fix 6 — worker order + cleanup (this change): the API now registers every River worker (media, mail, expiry sweep) *before* `riverClient.Start`, removing an unsynchronized map write the producer reads live. JWT parsing requires an `exp` claim (`jwt-go` only validates it when present) and `JWT_SECRET` must be ≥32 bytes. `FX_MWK_PER_USD` uses a real error instead of `%w` with nil. Caller `X-Request-ID` is sanitized to 64 safe characters before logging/echoing. Removed dead config (`EmailService`, `StripePublishableKey`, `StripePricePro`, `StripePriceScale`, `QRSigningSecret`) and added `EMAIL_HOST`/`EMAIL_PORT` so the SMTP relay is configurable instead of hardcoded to Gmail. Dockerfile documents `--entrypoint /app/worker` and the healthcheck follows `APP_PORT`. Product uploads (single and gallery) sniff magic bytes with `http.DetectContentType` and reject non-images before writing a temp file.
 
 Rules for this section: one bullet per landed module, commit hash included,
 key decisions noted (they explain otherwise-surprising code). Keep it to

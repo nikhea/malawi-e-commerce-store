@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"bufio"
 	"io"
 	"mime/multipart"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -389,30 +391,21 @@ func (h *Handler) UploadImage(c *gin.Context) {
 		return
 	}
 
-	file, header, err := c.Request.FormFile("file")
+	_, header, err := c.Request.FormFile("file")
 	if err != nil {
 		response.Error(c, apperr.Validation("image file is required"))
 		return
 	}
-	defer file.Close()
 	if header.Size > maxImageBytes {
 		response.Error(c, apperr.Validation("image exceeds 10 MiB"))
 		return
 	}
 
-	tmp, err := os.CreateTemp("", "prodimg-*"+filepath.Ext(header.Filename))
+	tmpPath, err := saveUpload(header)
 	if err != nil {
-		response.Error(c, apperr.Internal(err))
+		response.Error(c, err)
 		return
 	}
-	tmpPath := tmp.Name()
-	if _, err := io.Copy(tmp, file); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		response.Error(c, apperr.Internal(err))
-		return
-	}
-	tmp.Close()
 
 	if err := h.media.Enqueue(c.Request.Context(), mediapublic.EnqueueInput{
 		OwnerType: mediapublic.OwnerProduct,
@@ -560,6 +553,13 @@ func (h *Handler) UploadImages(c *gin.Context) {
 
 // saveUpload copies one multipart file into a temp file the River worker
 // owns (and deletes after upload).
+// sniffImage counts the leading bytes of an upload as an image type. The
+// filename extension proves nothing, and Cloudinary would happily store
+// whatever we hand it.
+func sniffImage(head []byte) bool {
+	return strings.HasPrefix(http.DetectContentType(head), "image/")
+}
+
 func saveUpload(header *multipart.FileHeader) (string, error) {
 	src, err := header.Open()
 	if err != nil {
@@ -567,12 +567,23 @@ func saveUpload(header *multipart.FileHeader) (string, error) {
 	}
 	defer src.Close()
 
+	// Peek (don't consume) the magic bytes before writing anything: a
+	// rejected upload costs no temp file.
+	br := bufio.NewReader(src)
+	head, _ := br.Peek(512)
+	if len(head) == 0 {
+		return "", apperr.Validation("image file is empty")
+	}
+	if !sniffImage(head) {
+		return "", apperr.Validation("uploaded file is not an image")
+	}
+
 	tmp, err := os.CreateTemp("", "prodimg-*"+filepath.Ext(header.Filename))
 	if err != nil {
 		return "", apperr.Internal(err)
 	}
 	tmpPath := tmp.Name()
-	if _, err := io.Copy(tmp, src); err != nil {
+	if _, err := io.Copy(tmp, br); err != nil {
 		tmp.Close()
 		os.Remove(tmpPath)
 		return "", apperr.Internal(err)

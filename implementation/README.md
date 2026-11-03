@@ -11,7 +11,7 @@ can be reviewed and merged in order. One branch + one commit per batch.
 | 3 | `fix/03-expiry-sweep-resilience` | Sweep continues past failures, settles per order status, converges on retry | done |
 | 4 | `fix/04-user-pii-and-reset-link` | Remove the customer-facing `GET /users/{id}`; reset links point at the frontend | done |
 | 5 | `fix/05-auth-idempotency-hardening` | Atomic refresh/reset token use, cart currency guard, body limits, idempotency in-flight lock | done |
-| 6 | `fix/06-worker-order-and-cleanup` | Register River workers before `Start`; low-severity cleanup | in progress |
+| 6 | `fix/06-worker-order-and-cleanup` | Register River workers before `Start`; low-severity cleanup | done |
 
 ## Ground rules
 

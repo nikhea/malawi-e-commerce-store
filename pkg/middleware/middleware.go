@@ -11,12 +11,34 @@ import (
 // requestIDKey is the Gin context + header key for the request id.
 const requestIDKey = "X-Request-ID"
 
+// maxRequestIDLen bounds the caller-supplied id we echo and log.
+const maxRequestIDLen = 64
+
+// sanitizeRequestID keeps only characters that are safe in a log line and
+// an HTTP header. A caller-supplied id with newlines could forge log
+// entries; an unbounded one could bloat every line.
+func sanitizeRequestID(id string) string {
+	if len(id) > maxRequestIDLen {
+		id = id[:maxRequestIDLen]
+	}
+	var b string
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			b += string(r)
+		case r == '-', r == '_', r == '.', r == ':', r == '/':
+			b += string(r)
+		}
+	}
+	return b
+}
+
 // RequestID assigns each request a UUID (or reuses the caller's
 // X-Request-ID header), exposes it as a response header, and stores it in
 // the Gin context so handlers and services can include it in logs.
 func RequestID() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		id := c.GetHeader(requestIDKey)
+		id := sanitizeRequestID(c.GetHeader(requestIDKey))
 		if id == "" {
 			id = uuid.NewString()
 		}
