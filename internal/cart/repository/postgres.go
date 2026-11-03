@@ -185,6 +185,7 @@ const upsertItemSQL = `INSERT INTO cart_items (cart_id, product_id, variant_id, 
 	           DO UPDATE SET qty = cart_items.qty + EXCLUDED.qty,
 	                         name = EXCLUDED.name, sku = EXCLUDED.sku,
 	                         unit_price_cents = EXCLUDED.unit_price_cents,
+	                         currency = EXCLUDED.currency,
 	                         updated_at = now()
 	           RETURNING ` + itemColumns
 

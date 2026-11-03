@@ -204,3 +204,46 @@ func TestCacheTTLIs24Hours(t *testing.T) {
 		t.Fatalf("expected ~24h ttl, got %s", ttl)
 	}
 }
+
+func TestConcurrentDuplicateIsRejected(t *testing.T) {
+	mr, store, calls := setup(t)
+	r := router(store, "u1", calls)
+
+	// Simulate the first request still running: the middleware holds this
+	// lock until the handler returns and the response is cached.
+	mr.Set("idem:v1:u1:k1:lock", "1")
+
+	w := do(r, "/bulk", "k1", `{}`)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for an in-flight key, got %d: %s", w.Code, w.Body.String())
+	}
+	if atomic.LoadInt32(calls) != 0 {
+		t.Fatalf("in-flight duplicate executed the handler: %d", *calls)
+	}
+}
+
+func TestLockIsReleasedAfterRequest(t *testing.T) {
+	mr, store, calls := setup(t)
+	r := router(store, "u1", calls)
+
+	if w := do(r, "/bulk", "k1", `{}`); w.Code != http.StatusOK {
+		t.Fatalf("first: %d", w.Code)
+	}
+	if mr.Exists("idem:v1:u1:k1:lock") {
+		t.Fatal("lock leaked after the request finished")
+	}
+}
+
+func TestOversizedBodyRejected(t *testing.T) {
+	_, store, calls := setup(t)
+	r := router(store, "u1", calls)
+
+	big := `{"pad":"` + strings.Repeat("a", 1<<20) + `"}`
+	w := do(r, "/bulk", "k1", big)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for an oversized idempotent body, got %d", w.Code)
+	}
+	if atomic.LoadInt32(calls) != 0 {
+		t.Fatalf("oversized body executed the handler: %d", *calls)
+	}
+}

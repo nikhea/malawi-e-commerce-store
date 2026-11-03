@@ -154,6 +154,10 @@ func detailFor(id string) (productspublic.Detail, error) {
 		return productspublic.Detail{
 			Product: productspublic.Product{ID: "prod-off", Name: "Old", PriceCents: 100, Currency: "USD", IsActive: false},
 		}, nil
+	case "prod-mwk":
+		return productspublic.Detail{
+			Product: productspublic.Product{ID: "prod-mwk", Name: "Legacy", PriceCents: 170000, Currency: "MWK", IsActive: true},
+		}, nil
 	}
 	return productspublic.Detail{}, apperr.NotFound("product not found")
 }
@@ -477,6 +481,62 @@ func TestBulkAdd(t *testing.T) {
 		}
 		if len(cart.Items) != 2 || cart.SubtotalCents != 1000+5000 {
 			t.Fatalf("bad cart: %+v", cart)
+		}
+	})
+}
+
+func TestMixedCurrencyRejected(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("add rejects the second currency", func(t *testing.T) {
+		svc := newService()
+		if _, err := svc.AddItem(ctx, public.AddItemInput{UserID: "u1", ProductID: "prod-simple", Qty: 1}); err != nil {
+			t.Fatalf("seed USD line: %v", err)
+		}
+		_, err := svc.AddItem(ctx, public.AddItemInput{UserID: "u1", ProductID: "prod-mwk", Qty: 1})
+		if apperr.CodeOf(err) != apperr.CodeValidation {
+			t.Fatalf("expected VALIDATION_ERROR for mixed currencies, got %v", err)
+		}
+		cart, err := svc.Get(ctx, "u1")
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		if len(cart.Items) != 1 || cart.Currency != "USD" {
+			t.Fatalf("mixed line leaked into the cart: %+v", cart)
+		}
+	})
+
+	t.Run("empty cart accepts either currency", func(t *testing.T) {
+		svc := newService()
+		cart, err := svc.AddItem(ctx, public.AddItemInput{UserID: "u1", ProductID: "prod-mwk", Qty: 1})
+		if err != nil {
+			t.Fatalf("first line should set the currency: %v", err)
+		}
+		if cart.Currency != "MWK" {
+			t.Fatalf("currency not tracked: %+v", cart)
+		}
+	})
+
+	t.Run("bulk add reports the bad currency per line", func(t *testing.T) {
+		svc := newService()
+		if _, err := svc.AddItem(ctx, public.AddItemInput{UserID: "u1", ProductID: "prod-simple", Qty: 1}); err != nil {
+			t.Fatalf("seed USD line: %v", err)
+		}
+		results, cart, err := svc.BulkAdd(ctx, "u1", []public.BulkAddItem{
+			{ProductID: "prod-mwk", Qty: 1},
+			{ProductID: "prod-simple", Qty: 2},
+		}, false)
+		if err != nil {
+			t.Fatalf("bulk add: %v", err)
+		}
+		if results[0].Status != "error" || results[0].Error.Code != apperr.CodeValidation {
+			t.Fatalf("mixed line should be VALIDATION_ERROR: %+v", results[0])
+		}
+		if results[1].Status != "ok" {
+			t.Fatalf("same-currency line should succeed: %+v", results[1])
+		}
+		if len(cart.Items) != 1 {
+			t.Fatalf("mixed line leaked into the cart: %+v", cart)
 		}
 	})
 }

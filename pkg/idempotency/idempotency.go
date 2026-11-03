@@ -28,6 +28,12 @@ const (
 	keyPrefix  = "idem:v1:"
 	defaultTTL = 24 * time.Hour
 	maxKeyLen  = 200
+	// maxBodyBytes caps what the middleware will buffer to hash and replay.
+	// Bulk JSON is tiny; anything near this is abuse, not a bulk request.
+	maxBodyBytes = 1 << 20
+	// lockTTL covers one in-flight handler. Long enough for a 50-item
+	// transaction, short enough that a crashed process cannot wedge a key.
+	lockTTL = 30 * time.Second
 )
 
 // Store is the Redis-backed idempotency cache. A nil *Store is valid and
@@ -74,7 +80,7 @@ func (s *Store) Middleware() gin.HandlerFunc {
 
 		body, err := readBody(c)
 		if err != nil {
-			response.Error(c, apperr.Internal(err))
+			response.Error(c, err)
 			c.Abort()
 			return
 		}
@@ -91,6 +97,33 @@ func (s *Store) Middleware() gin.HandlerFunc {
 			response.Error(c, apperr.IdempotencyConflict("idempotency key reused with a different request"))
 			c.Abort()
 			return
+		}
+
+		// Serialize duplicates that arrive before the first response is
+		// cached. Without this, two concurrent identical bulk writes both
+		// miss the cache and both execute (double quantities in a cart).
+		lockKey := redisKey + ":lock"
+		acquired, lerr := s.client.SetNX(ctx, lockKey, "1", lockTTL).Result()
+		if lerr != nil {
+			// Fail-open, same posture as the cache: better to risk a
+			// duplicate than to take bulk writes down with Redis.
+			log.Printf("idempotency: redis lock (fail-open): %v", lerr)
+			acquired = true
+		}
+		if !acquired {
+			response.Error(c, apperr.Conflict("request with this idempotency key is already in progress"))
+			c.Abort()
+			return
+		}
+		if lerr == nil {
+			defer func() {
+				// The client may have disconnected; release anyway.
+				relCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+				defer cancel()
+				if derr := s.client.Del(relCtx, lockKey).Err(); derr != nil {
+					log.Printf("idempotency: release lock (ignored): %v", derr)
+				}
+			}()
 		}
 
 		capture := &captureWriter{ResponseWriter: c.Writer}
@@ -148,9 +181,14 @@ func readBody(c *gin.Context) ([]byte, error) {
 	if c.Request.Body == nil {
 		return nil, nil
 	}
-	body, err := io.ReadAll(c.Request.Body)
+	// Read one byte past the cap so an oversized body is detectable
+	// without buffering all of it.
+	body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxBodyBytes+1))
 	if err != nil {
-		return nil, err
+		return nil, apperr.Internal(err)
+	}
+	if len(body) > maxBodyBytes {
+		return nil, apperr.Validation("request body is too large for idempotent replay")
 	}
 	c.Request.Body = io.NopCloser(bytes.NewReader(body))
 	return body, nil

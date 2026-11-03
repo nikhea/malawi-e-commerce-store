@@ -239,6 +239,9 @@ func newRouter(cfg config.Config) (*gin.Engine, error) {
 	// global: preflights must answer before auth, headers on every reply.
 	r.Use(cors.New(middleware.CORSConfig(cfg.AppURL, cfg.FrontendURL)))
 	r.Use(middleware.SecureHeaders())
+	// Bound every request body before any handler binds it. Multipart gets
+	// the larger allowance so product image batches keep working.
+	r.Use(middleware.BodyLimit(middleware.DefaultJSONBodyLimit, middleware.DefaultMultipartBodyLimit))
 	if err := r.SetTrustedProxies(nil); err != nil {
 		return nil, fmt.Errorf("trusted proxies: %w", err)
 	}

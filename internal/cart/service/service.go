@@ -214,9 +214,12 @@ func (s *service) AddItem(ctx context.Context, in public.AddItemInput) (public.C
 	if err != nil {
 		return public.Cart{}, err
 	}
-	cart, _, err := s.load(ctx, in.UserID)
+	cart, before, err := s.load(ctx, in.UserID)
 	if err != nil {
 		return public.Cart{}, err
+	}
+	if cur, ok := cartCurrency(before); ok && !strings.EqualFold(cur, item.Currency) {
+		return public.Cart{}, apperr.Validation("cart cannot mix currencies")
 	}
 	item.CartID = cart.ID
 	if _, err := s.repo.UpsertItem(ctx, item); err != nil {
@@ -261,10 +264,20 @@ func (s *service) BulkAdd(ctx context.Context, userID string, items []public.Bul
 	prepared := make([]model.Item, len(items))
 	itemErrs := make([]error, len(items))
 	results := make([]bulk.BulkResult[public.Line], len(items))
+	cur, hasCur := cartCurrency(before)
 	for i, in := range items {
 		key := bulk.LineKey(strings.TrimSpace(in.ProductID), in.VariantID)
 		results[i] = bulk.BulkResult[public.Line]{Index: i, ID: key, Status: "ok"}
 		item, err := s.prepareAdd(ctx, in.ProductID, in.VariantID, in.Qty)
+		if err == nil {
+			// One currency per cart: mixing ISO codes makes the subtotal
+			// meaningless. The first successful line sets the currency.
+			if hasCur && !strings.EqualFold(cur, item.Currency) {
+				err = apperr.Validation("cart cannot mix currencies")
+			} else {
+				cur, hasCur = item.Currency, true
+			}
+		}
 		if err != nil {
 			itemErrs[i] = err
 			results[i] = bulk.Failed[public.Line](i, key, err)
@@ -316,6 +329,15 @@ func (s *service) BulkAdd(ctx context.Context, userID string, items []public.Bul
 		return nil, public.Cart{}, err
 	}
 	return results, view, nil
+}
+
+// cartCurrency reports the cart's active currency once it holds a line.
+// An empty cart has no currency to conflict with.
+func cartCurrency(cart public.Cart) (string, bool) {
+	if len(cart.Items) == 0 {
+		return "", false
+	}
+	return cart.Currency, true
 }
 
 func findVariant(variants []productspublic.VariantView, id string) (productspublic.VariantView, bool) {

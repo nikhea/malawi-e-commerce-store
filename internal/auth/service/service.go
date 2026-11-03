@@ -267,6 +267,15 @@ func (s *service) Refresh(ctx context.Context, refreshToken string) (authpublic.
 		return authpublic.TokenPair{}, err
 	}
 	if err := s.repo.RotateRefresh(ctx, rt.ID, newID); err != nil {
+		if apperr.CodeOf(err) == apperr.CodeConflict {
+			// Lost the rotation race (two refreshes with the same token).
+			// Treat it as reuse theft: burn the replacement just minted so
+			// it cannot become a live orphan, and sign the user out
+			// everywhere.
+			_ = s.repo.RevokeRefresh(ctx, utils.HashSecret(newRefresh))
+			_ = s.repo.RevokeUserRefresh(ctx, rt.UserID)
+			return authpublic.TokenPair{}, apperr.Unauthorized("session compromised, signed out everywhere")
+		}
 		return authpublic.TokenPair{}, err
 	}
 	return authpublic.TokenPair{
