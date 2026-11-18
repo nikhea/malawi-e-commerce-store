@@ -766,6 +766,18 @@ definitions:
         example: 3
         type: integer
     type: object
+  public.Aggregates:
+    properties:
+      items:
+        $ref: '#/definitions/public.ItemsAggregate'
+      orders:
+        $ref: '#/definitions/public.OrdersAggregate'
+    type: object
+  public.AggregatesResponse:
+    properties:
+      data:
+        $ref: '#/definitions/public.Aggregates'
+    type: object
   public.Cart:
     properties:
       currency:
@@ -790,6 +802,36 @@ definitions:
         $ref: '#/definitions/public.Cart'
       meta:
         $ref: '#/definitions/pagination.Meta'
+    type: object
+  public.CartedProduct:
+    properties:
+      cart_qty:
+        type: integer
+      carts:
+        type: integer
+      name:
+        type: string
+      product_id:
+        type: string
+      slug:
+        type: string
+    type: object
+  public.Catalog:
+    properties:
+      active_products:
+        type: integer
+      active_variants:
+        type: integer
+      inactive_products:
+        type: integer
+      ready_images:
+        type: integer
+      total_categories:
+        type: integer
+      total_products:
+        type: integer
+      total_variants:
+        type: integer
     type: object
   public.Category:
     properties:
@@ -833,6 +875,78 @@ definitions:
       url:
         type: string
     type: object
+  public.CurrencyOrderTotal:
+    properties:
+      currency:
+        example: USD
+        type: string
+      orders:
+        type: integer
+      total_cents:
+        type: integer
+    type: object
+  public.CurrencyRevenue:
+    properties:
+      currency:
+        example: USD
+        type: string
+      lines:
+        example: 12
+        type: integer
+      revenue_cents:
+        example: 12500
+        type: integer
+      units_sold:
+        example: 23
+        type: integer
+    type: object
+  public.CurrencyTotal:
+    properties:
+      average_cents:
+        example: 2500
+        type: integer
+      currency:
+        example: USD
+        type: string
+      orders:
+        example: 5
+        type: integer
+      total_cents:
+        example: 12500
+        type: integer
+    type: object
+  public.Customers:
+    properties:
+      new_customers_30d:
+        type: integer
+      paying_customers:
+        type: integer
+      succeeded_payment_customers:
+        type: integer
+      total_admins:
+        type: integer
+      total_customers:
+        type: integer
+      total_users:
+        type: integer
+      verified_customers:
+        type: integer
+    type: object
+  public.Demand:
+    properties:
+      most_carted:
+        items:
+          $ref: '#/definitions/public.CartedProduct'
+        type: array
+      most_ordered:
+        items:
+          $ref: '#/definitions/public.OrderedProduct'
+        type: array
+      most_wishlisted:
+        items:
+          $ref: '#/definitions/public.WishlistedProduct'
+        type: array
+    type: object
   public.Detail:
     properties:
       images:
@@ -846,6 +960,23 @@ definitions:
         items:
           $ref: '#/definitions/public.VariantView'
         type: array
+    type: object
+  public.Fulfillment:
+    properties:
+      active_reservations:
+        type: integer
+      active_reserved_qty:
+        type: integer
+      confirmed_qty:
+        type: integer
+      confirmed_reservations:
+        type: integer
+      expired_active_holds:
+        type: integer
+      released_qty:
+        type: integer
+      released_reservations:
+        type: integer
     type: object
   public.Image:
     properties:
@@ -879,6 +1010,23 @@ definitions:
         $ref: '#/definitions/public.ProductSummary'
       product_id:
         type: string
+    type: object
+  public.ItemsAggregate:
+    properties:
+      lines:
+        example: 12
+        type: integer
+      revenue_by_currency:
+        items:
+          $ref: '#/definitions/public.CurrencyRevenue'
+        type: array
+      top_products:
+        items:
+          $ref: '#/definitions/public.ProductTotal'
+        type: array
+      units_sold:
+        example: 23
+        type: integer
     type: object
   public.Line:
     properties:
@@ -1000,6 +1148,89 @@ definitions:
       meta:
         $ref: '#/definitions/pagination.Meta'
     type: object
+  public.OrderedProduct:
+    properties:
+      currency:
+        example: USD
+        type: string
+      name:
+        type: string
+      orders:
+        type: integer
+      product_id:
+        type: string
+      revenue_cents:
+        type: integer
+      sku:
+        type: string
+      units_sold:
+        type: integer
+    type: object
+  public.Orders:
+    properties:
+      by_currency:
+        items:
+          $ref: '#/definitions/public.CurrencyOrderTotal'
+        type: array
+      cancelled:
+        type: integer
+      last_30d:
+        type: integer
+      paid:
+        type: integer
+      paid_revenue_by_currency:
+        items:
+          $ref: '#/definitions/public.CurrencyOrderTotal'
+        type: array
+      pending:
+        type: integer
+      total:
+        type: integer
+    type: object
+  public.OrdersAggregate:
+    properties:
+      by_currency:
+        items:
+          $ref: '#/definitions/public.CurrencyTotal'
+        type: array
+      by_status:
+        items:
+          $ref: '#/definitions/public.StatusTotal'
+        type: array
+      count:
+        example: 5
+        type: integer
+      first_order_at:
+        type: string
+      last_order_at:
+        type: string
+    type: object
+  public.Overview:
+    properties:
+      catalog:
+        $ref: '#/definitions/public.Catalog'
+      customers:
+        $ref: '#/definitions/public.Customers'
+      demand:
+        $ref: '#/definitions/public.Demand'
+      fulfillment:
+        $ref: '#/definitions/public.Fulfillment'
+      generated_at:
+        type: string
+      orders:
+        $ref: '#/definitions/public.Orders'
+      payments:
+        $ref: '#/definitions/public.Payments'
+      reviews:
+        $ref: '#/definitions/public.Reviews'
+      stock:
+        $ref: '#/definitions/public.StockHealth'
+    type: object
+  public.OverviewResponse:
+    properties:
+      data:
+        $ref: '#/definitions/public.Overview'
+    type: object
   public.Payment:
     properties:
       amount_cents:
@@ -1024,6 +1255,28 @@ definitions:
         type: string
       stripe_intent_id:
         type: string
+    type: object
+  public.PaymentStatusTotal:
+    properties:
+      charged_cents:
+        type: integer
+      currency:
+        example: USD
+        type: string
+      original_order_cents:
+        type: integer
+      payments:
+        type: integer
+      status:
+        example: succeeded
+        type: string
+    type: object
+  public.Payments:
+    properties:
+      by_status:
+        items:
+          $ref: '#/definitions/public.PaymentStatusTotal'
+        type: array
     type: object
   public.Product:
     properties:
@@ -1085,6 +1338,27 @@ definitions:
         example: sunseed-cooking-oil-2l
         type: string
     type: object
+  public.ProductTotal:
+    properties:
+      currency:
+        example: USD
+        type: string
+      name:
+        type: string
+      orders:
+        example: 4
+        type: integer
+      product_id:
+        type: string
+      revenue_cents:
+        example: 12000
+        type: integer
+      sku:
+        type: string
+      units_sold:
+        example: 12
+        type: integer
+    type: object
   public.Review:
     properties:
       author:
@@ -1108,6 +1382,15 @@ definitions:
       user_id:
         type: string
     type: object
+  public.Reviews:
+    properties:
+      average_rating:
+        type: number
+      last_30d:
+        type: integer
+      total:
+        type: integer
+    type: object
   public.Role:
     enum:
     - admin
@@ -1116,6 +1399,24 @@ definitions:
     x-enum-varnames:
     - RoleAdmin
     - RoleCustomer
+  public.StatusTotal:
+    properties:
+      average_cents:
+        example: 2500
+        type: integer
+      currency:
+        example: USD
+        type: string
+      orders:
+        example: 5
+        type: integer
+      status:
+        example: paid
+        type: string
+      total_cents:
+        example: 12500
+        type: integer
+    type: object
   public.Stock:
     properties:
       available:
@@ -1131,6 +1432,19 @@ definitions:
         type: integer
       variant_id:
         type: string
+    type: object
+  public.StockHealth:
+    properties:
+      available_qty:
+        type: integer
+      on_hand_qty:
+        type: integer
+      out_of_stock_rows:
+        type: integer
+      reserved_qty:
+        type: integer
+      rows:
+        type: integer
     type: object
   public.Summary:
     properties:
@@ -1262,6 +1576,17 @@ definitions:
         type: array
       meta:
         $ref: '#/definitions/pagination.Meta'
+    type: object
+  public.WishlistedProduct:
+    properties:
+      name:
+        type: string
+      product_id:
+        type: string
+      slug:
+        type: string
+      wishlists:
+        type: integer
     type: object
   response.ErrorDetail:
     properties:
@@ -1447,6 +1772,31 @@ paths:
       summary: Upload a category image (admin)
       tags:
       - admin
+  /admin/dashboard/overview:
+    get:
+      description: |-
+        Whole-store snapshot: catalog, customers, paying customers, order statuses, reservation/fulfillment states, stock health, payments, review summary and the top ordered/wishlisted/carted products.
+        Money stays grouped by currency; legacy MWK is never added to USD. Orders have no shipping states, so fulfillment is reported from inventory reservations.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.OverviewResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Admin dashboard overview
+      tags:
+      - admin-dashboard
   /admin/inventory/confirm:
     post:
       consumes:
@@ -1696,6 +2046,56 @@ paths:
       summary: Set on-hand stock for many SKUs (admin)
       tags:
       - admin
+  /admin/orders/aggregates:
+    get:
+      description: |-
+        Order and line-item totals across every customer, optionally narrowed with user_id.
+        Money is grouped by currency: legacy MWK is never added to USD.
+      parameters:
+      - description: Optional customer UUID; omit for all customers
+        in: query
+        name: user_id
+        type: string
+      - description: pending|paid|cancelled
+        in: query
+        name: status
+        type: string
+      - description: Filter by currency (e.g. USD)
+        in: query
+        name: currency
+        type: string
+      - description: Created at or after (RFC3339 or YYYY-MM-DD)
+        in: query
+        name: created_after
+        type: string
+      - description: Created at or before (RFC3339 or YYYY-MM-DD)
+        in: query
+        name: created_before
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.AggregatesResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Aggregate all orders (admin)
+      tags:
+      - admin-orders
   /admin/products:
     post:
       consumes:
@@ -3138,6 +3538,48 @@ paths:
       security:
       - BearerAuth: []
       summary: Cancel my pending order
+      tags:
+      - orders
+  /orders/aggregates:
+    get:
+      description: |-
+        Order and line-item totals for the caller. Counts cover all matching rows; the product breakdown is the top 10 by units sold.
+        Money is grouped by currency: legacy MWK is never added to USD.
+      parameters:
+      - description: pending|paid|cancelled
+        in: query
+        name: status
+        type: string
+      - description: Filter by currency (e.g. USD)
+        in: query
+        name: currency
+        type: string
+      - description: Created at or after (RFC3339 or YYYY-MM-DD)
+        in: query
+        name: created_after
+        type: string
+      - description: Created at or before (RFC3339 or YYYY-MM-DD)
+        in: query
+        name: created_before
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/public.AggregatesResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/response.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Aggregate my orders
       tags:
       - orders
   /orders/checkout:

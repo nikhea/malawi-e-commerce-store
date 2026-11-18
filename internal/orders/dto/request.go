@@ -14,3 +14,13 @@ type ListOrdersQuery struct {
 	Limit         int    `form:"limit"`
 	Offset        int    `form:"offset"`
 }
+
+// AggregateOrdersQuery binds the aggregate filters. user_id is admin-only;
+// the customer route ignores it and always uses the token's identity.
+type AggregateOrdersQuery struct {
+	Status        string `form:"status"`
+	Currency      string `form:"currency"`
+	CreatedAfter  string `form:"created_after"`
+	CreatedBefore string `form:"created_before"`
+	UserID        string `form:"user_id"`
+}

@@ -265,6 +265,43 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/dashboard/overview": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Whole-store snapshot: catalog, customers, paying customers, order statuses, reservation/fulfillment states, stock health, payments, review summary and the top ordered/wishlisted/carted products.\nMoney stays grouped by currency; legacy MWK is never added to USD. Orders have no shipping states, so fulfillment is reported from inventory reservations.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-dashboard"
+                ],
+                "summary": "Admin dashboard overview",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/public.OverviewResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/admin/inventory/confirm": {
             "post": {
                 "security": [
@@ -640,6 +677,81 @@ const docTemplate = `{
                     },
                     "409": {
                         "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/orders/aggregates": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Order and line-item totals across every customer, optionally narrowed with user_id.\nMoney is grouped by currency: legacy MWK is never added to USD.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-orders"
+                ],
+                "summary": "Aggregate all orders (admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Optional customer UUID; omit for all customers",
+                        "name": "user_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "pending|paid|cancelled",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by currency (e.g. USD)",
+                        "name": "currency",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Created at or after (RFC3339 or YYYY-MM-DD)",
+                        "name": "created_after",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Created at or before (RFC3339 or YYYY-MM-DD)",
+                        "name": "created_before",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/public.AggregatesResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/response.ErrorResponse"
                         }
@@ -2731,6 +2843,69 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/public.OrderListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/orders/aggregates": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Order and line-item totals for the caller. Counts cover all matching rows; the product breakdown is the top 10 by units sold.\nMoney is grouped by currency: legacy MWK is never added to USD.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "orders"
+                ],
+                "summary": "Aggregate my orders",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "pending|paid|cancelled",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by currency (e.g. USD)",
+                        "name": "currency",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Created at or after (RFC3339 or YYYY-MM-DD)",
+                        "name": "created_after",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Created at or before (RFC3339 or YYYY-MM-DD)",
+                        "name": "created_before",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/public.AggregatesResponse"
                         }
                     },
                     "400": {
@@ -5222,6 +5397,25 @@ const docTemplate = `{
                 }
             }
         },
+        "public.Aggregates": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "$ref": "#/definitions/public.ItemsAggregate"
+                },
+                "orders": {
+                    "$ref": "#/definitions/public.OrdersAggregate"
+                }
+            }
+        },
+        "public.AggregatesResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/public.Aggregates"
+                }
+            }
+        },
         "public.Cart": {
             "type": "object",
             "properties": {
@@ -5257,6 +5451,52 @@ const docTemplate = `{
                 },
                 "meta": {
                     "$ref": "#/definitions/pagination.Meta"
+                }
+            }
+        },
+        "public.CartedProduct": {
+            "type": "object",
+            "properties": {
+                "cart_qty": {
+                    "type": "integer"
+                },
+                "carts": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "product_id": {
+                    "type": "string"
+                },
+                "slug": {
+                    "type": "string"
+                }
+            }
+        },
+        "public.Catalog": {
+            "type": "object",
+            "properties": {
+                "active_products": {
+                    "type": "integer"
+                },
+                "active_variants": {
+                    "type": "integer"
+                },
+                "inactive_products": {
+                    "type": "integer"
+                },
+                "ready_images": {
+                    "type": "integer"
+                },
+                "total_categories": {
+                    "type": "integer"
+                },
+                "total_products": {
+                    "type": "integer"
+                },
+                "total_variants": {
+                    "type": "integer"
                 }
             }
         },
@@ -5322,6 +5562,112 @@ const docTemplate = `{
                 }
             }
         },
+        "public.CurrencyOrderTotal": {
+            "type": "object",
+            "properties": {
+                "currency": {
+                    "type": "string",
+                    "example": "USD"
+                },
+                "orders": {
+                    "type": "integer"
+                },
+                "total_cents": {
+                    "type": "integer"
+                }
+            }
+        },
+        "public.CurrencyRevenue": {
+            "type": "object",
+            "properties": {
+                "currency": {
+                    "type": "string",
+                    "example": "USD"
+                },
+                "lines": {
+                    "type": "integer",
+                    "example": 12
+                },
+                "revenue_cents": {
+                    "type": "integer",
+                    "example": 12500
+                },
+                "units_sold": {
+                    "type": "integer",
+                    "example": 23
+                }
+            }
+        },
+        "public.CurrencyTotal": {
+            "type": "object",
+            "properties": {
+                "average_cents": {
+                    "type": "integer",
+                    "example": 2500
+                },
+                "currency": {
+                    "type": "string",
+                    "example": "USD"
+                },
+                "orders": {
+                    "type": "integer",
+                    "example": 5
+                },
+                "total_cents": {
+                    "type": "integer",
+                    "example": 12500
+                }
+            }
+        },
+        "public.Customers": {
+            "type": "object",
+            "properties": {
+                "new_customers_30d": {
+                    "type": "integer"
+                },
+                "paying_customers": {
+                    "type": "integer"
+                },
+                "succeeded_payment_customers": {
+                    "type": "integer"
+                },
+                "total_admins": {
+                    "type": "integer"
+                },
+                "total_customers": {
+                    "type": "integer"
+                },
+                "total_users": {
+                    "type": "integer"
+                },
+                "verified_customers": {
+                    "type": "integer"
+                }
+            }
+        },
+        "public.Demand": {
+            "type": "object",
+            "properties": {
+                "most_carted": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.CartedProduct"
+                    }
+                },
+                "most_ordered": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.OrderedProduct"
+                    }
+                },
+                "most_wishlisted": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.WishlistedProduct"
+                    }
+                }
+            }
+        },
         "public.Detail": {
             "type": "object",
             "properties": {
@@ -5340,6 +5686,32 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/public.VariantView"
                     }
+                }
+            }
+        },
+        "public.Fulfillment": {
+            "type": "object",
+            "properties": {
+                "active_reservations": {
+                    "type": "integer"
+                },
+                "active_reserved_qty": {
+                    "type": "integer"
+                },
+                "confirmed_qty": {
+                    "type": "integer"
+                },
+                "confirmed_reservations": {
+                    "type": "integer"
+                },
+                "expired_active_holds": {
+                    "type": "integer"
+                },
+                "released_qty": {
+                    "type": "integer"
+                },
+                "released_reservations": {
+                    "type": "integer"
                 }
             }
         },
@@ -5389,6 +5761,31 @@ const docTemplate = `{
                 },
                 "product_id": {
                     "type": "string"
+                }
+            }
+        },
+        "public.ItemsAggregate": {
+            "type": "object",
+            "properties": {
+                "lines": {
+                    "type": "integer",
+                    "example": 12
+                },
+                "revenue_by_currency": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.CurrencyRevenue"
+                    }
+                },
+                "top_products": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.ProductTotal"
+                    }
+                },
+                "units_sold": {
+                    "type": "integer",
+                    "example": 23
                 }
             }
         },
@@ -5569,6 +5966,132 @@ const docTemplate = `{
                 }
             }
         },
+        "public.OrderedProduct": {
+            "type": "object",
+            "properties": {
+                "currency": {
+                    "type": "string",
+                    "example": "USD"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "orders": {
+                    "type": "integer"
+                },
+                "product_id": {
+                    "type": "string"
+                },
+                "revenue_cents": {
+                    "type": "integer"
+                },
+                "sku": {
+                    "type": "string"
+                },
+                "units_sold": {
+                    "type": "integer"
+                }
+            }
+        },
+        "public.Orders": {
+            "type": "object",
+            "properties": {
+                "by_currency": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.CurrencyOrderTotal"
+                    }
+                },
+                "cancelled": {
+                    "type": "integer"
+                },
+                "last_30d": {
+                    "type": "integer"
+                },
+                "paid": {
+                    "type": "integer"
+                },
+                "paid_revenue_by_currency": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.CurrencyOrderTotal"
+                    }
+                },
+                "pending": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "public.OrdersAggregate": {
+            "type": "object",
+            "properties": {
+                "by_currency": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.CurrencyTotal"
+                    }
+                },
+                "by_status": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.StatusTotal"
+                    }
+                },
+                "count": {
+                    "type": "integer",
+                    "example": 5
+                },
+                "first_order_at": {
+                    "type": "string"
+                },
+                "last_order_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "public.Overview": {
+            "type": "object",
+            "properties": {
+                "catalog": {
+                    "$ref": "#/definitions/public.Catalog"
+                },
+                "customers": {
+                    "$ref": "#/definitions/public.Customers"
+                },
+                "demand": {
+                    "$ref": "#/definitions/public.Demand"
+                },
+                "fulfillment": {
+                    "$ref": "#/definitions/public.Fulfillment"
+                },
+                "generated_at": {
+                    "type": "string"
+                },
+                "orders": {
+                    "$ref": "#/definitions/public.Orders"
+                },
+                "payments": {
+                    "$ref": "#/definitions/public.Payments"
+                },
+                "reviews": {
+                    "$ref": "#/definitions/public.Reviews"
+                },
+                "stock": {
+                    "$ref": "#/definitions/public.StockHealth"
+                }
+            }
+        },
+        "public.OverviewResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/public.Overview"
+                }
+            }
+        },
         "public.Payment": {
             "type": "object",
             "properties": {
@@ -5602,6 +6125,39 @@ const docTemplate = `{
                 },
                 "stripe_intent_id": {
                     "type": "string"
+                }
+            }
+        },
+        "public.PaymentStatusTotal": {
+            "type": "object",
+            "properties": {
+                "charged_cents": {
+                    "type": "integer"
+                },
+                "currency": {
+                    "type": "string",
+                    "example": "USD"
+                },
+                "original_order_cents": {
+                    "type": "integer"
+                },
+                "payments": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "succeeded"
+                }
+            }
+        },
+        "public.Payments": {
+            "type": "object",
+            "properties": {
+                "by_status": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.PaymentStatusTotal"
+                    }
                 }
             }
         },
@@ -5691,6 +6247,36 @@ const docTemplate = `{
                 }
             }
         },
+        "public.ProductTotal": {
+            "type": "object",
+            "properties": {
+                "currency": {
+                    "type": "string",
+                    "example": "USD"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "orders": {
+                    "type": "integer",
+                    "example": 4
+                },
+                "product_id": {
+                    "type": "string"
+                },
+                "revenue_cents": {
+                    "type": "integer",
+                    "example": 12000
+                },
+                "sku": {
+                    "type": "string"
+                },
+                "units_sold": {
+                    "type": "integer",
+                    "example": 12
+                }
+            }
+        },
         "public.Review": {
             "type": "object",
             "properties": {
@@ -5724,6 +6310,20 @@ const docTemplate = `{
                 }
             }
         },
+        "public.Reviews": {
+            "type": "object",
+            "properties": {
+                "average_rating": {
+                    "type": "number"
+                },
+                "last_30d": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
         "public.Role": {
             "type": "string",
             "enum": [
@@ -5734,6 +6334,31 @@ const docTemplate = `{
                 "RoleAdmin",
                 "RoleCustomer"
             ]
+        },
+        "public.StatusTotal": {
+            "type": "object",
+            "properties": {
+                "average_cents": {
+                    "type": "integer",
+                    "example": 2500
+                },
+                "currency": {
+                    "type": "string",
+                    "example": "USD"
+                },
+                "orders": {
+                    "type": "integer",
+                    "example": 5
+                },
+                "status": {
+                    "type": "string",
+                    "example": "paid"
+                },
+                "total_cents": {
+                    "type": "integer",
+                    "example": 12500
+                }
+            }
         },
         "public.Stock": {
             "type": "object",
@@ -5755,6 +6380,26 @@ const docTemplate = `{
                 },
                 "variant_id": {
                     "type": "string"
+                }
+            }
+        },
+        "public.StockHealth": {
+            "type": "object",
+            "properties": {
+                "available_qty": {
+                    "type": "integer"
+                },
+                "on_hand_qty": {
+                    "type": "integer"
+                },
+                "out_of_stock_rows": {
+                    "type": "integer"
+                },
+                "reserved_qty": {
+                    "type": "integer"
+                },
+                "rows": {
+                    "type": "integer"
                 }
             }
         },
@@ -5941,6 +6586,23 @@ const docTemplate = `{
                 },
                 "meta": {
                     "$ref": "#/definitions/pagination.Meta"
+                }
+            }
+        },
+        "public.WishlistedProduct": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "product_id": {
+                    "type": "string"
+                },
+                "slug": {
+                    "type": "string"
+                },
+                "wishlists": {
+                    "type": "integer"
                 }
             }
         },

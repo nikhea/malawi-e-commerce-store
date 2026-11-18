@@ -601,6 +601,144 @@ export type ListOrdersParams = {
 
 export type OrderListResponse = Paginated<Order>;
 
+/** Shared filters for both aggregate endpoints. `user_id` is admin-only. */
+export type AggregateOrdersParams = {
+  status?: OrderStatus;
+  currency?: string;
+  /** RFC3339 or YYYY-MM-DD. */
+  created_after?: string;
+  /** RFC3339 or YYYY-MM-DD; a date-only value includes the whole day. */
+  created_before?: string;
+  /** Admin only: optional customer UUID. Omit to aggregate every customer. */
+  user_id?: string;
+};
+
+/** Money is grouped by currency: legacy MWK is never added to USD. */
+export type OrderStatusTotal = {
+  status: OrderStatus;
+  currency: string;
+  orders: number;
+  total_cents: number;
+  average_cents: number;
+};
+
+export type OrderCurrencyTotal = {
+  currency: string;
+  orders: number;
+  total_cents: number;
+  average_cents: number;
+};
+
+export type OrderAggregate = {
+  count: number;
+  first_order_at?: string;
+  last_order_at?: string;
+  by_status: OrderStatusTotal[];
+  by_currency: OrderCurrencyTotal[];
+};
+
+export type ProductTotal = {
+  product_id: string;
+  name: string;
+  sku?: string;
+  currency: string;
+  units_sold: number;
+  orders: number;
+  revenue_cents: number;
+};
+
+export type CurrencyRevenue = {
+  currency: string;
+  lines: number;
+  units_sold: number;
+  revenue_cents: number;
+};
+
+export type ItemsAggregate = {
+  lines: number;
+  units_sold: number;
+  revenue_by_currency: CurrencyRevenue[];
+  /** Ranked by units sold, capped at 10 by the server. */
+  top_products: ProductTotal[];
+};
+
+/** GET /orders/aggregates and GET /admin/orders/aggregates (`data` payload). */
+export type OrderAggregates = {
+  orders: OrderAggregate;
+  items: ItemsAggregate;
+};
+
+// ---------------------------------------------------------------------------
+// dashboard — /api/v1/admin/dashboard/overview (admin only)
+// ---------------------------------------------------------------------------
+
+/** Whole-store snapshot. Money is grouped by currency, never summed across currencies. */
+export type DashboardOverview = {
+  generated_at: string;
+  catalog: {
+    total_products: number;
+    active_products: number;
+    inactive_products: number;
+    total_variants: number;
+    active_variants: number;
+    total_categories: number;
+    ready_images: number;
+  };
+  customers: {
+    total_users: number;
+    total_customers: number;
+    verified_customers: number;
+    total_admins: number;
+    new_customers_30d: number;
+    paying_customers: number;
+    succeeded_payment_customers: number;
+  };
+  orders: {
+    total: number;
+    pending: number;
+    paid: number;
+    cancelled: number;
+    last_30d: number;
+    by_currency: { currency: string; orders: number; total_cents: number }[];
+    paid_revenue_by_currency: { currency: string; orders: number; total_cents: number }[];
+  };
+  /** Orders have no shipping states; these are inventory reservation counts. */
+  fulfillment: {
+    active_reservations: number;
+    confirmed_reservations: number;
+    released_reservations: number;
+    active_reserved_qty: number;
+    confirmed_qty: number;
+    released_qty: number;
+    expired_active_holds: number;
+  };
+  stock: {
+    rows: number;
+    on_hand_qty: number;
+    reserved_qty: number;
+    available_qty: number;
+    out_of_stock_rows: number;
+  };
+  reviews: { total: number; average_rating: number; last_30d: number };
+  payments: {
+    by_status: {
+      status: "pending" | "succeeded" | "failed" | "cancelled";
+      currency: string;
+      payments: number;
+      charged_cents: number;
+      original_order_cents: number;
+    }[];
+  };
+  demand: {
+    /** Ranked by units in paid orders, top 5. */
+    most_ordered: ProductTotal[];
+    /** Ranked by wishlist hearts, top 5. */
+    most_wishlisted: { product_id: string; name: string; slug: string; wishlists: number }[];
+    /** Ranked by quantity in live carts, top 5. */
+    most_carted: { product_id: string; name: string; slug: string; cart_qty: number; carts: number }[];
+  };
+};
+
 // ---------------------------------------------------------------------------
 // payments — /api/v1/payments (JWT) + /api/v1/webhooks/stripe (public)
 // ---------------------------------------------------------------------------

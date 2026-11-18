@@ -8,7 +8,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/nikhea/malawi-e-commerce-store/internal/cart"
+	"github.com/nikhea/malawi-e-commerce-store/internal/dashboard"
 	"github.com/nikhea/malawi-e-commerce-store/internal/inventory"
+	"github.com/nikhea/malawi-e-commerce-store/internal/orders"
 	"github.com/nikhea/malawi-e-commerce-store/internal/products"
 	"github.com/nikhea/malawi-e-commerce-store/internal/reviews"
 	"github.com/nikhea/malawi-e-commerce-store/internal/variants"
@@ -37,6 +39,8 @@ func testRouter() *gin.Engine {
 	})
 
 	inventory.RegisterRoutes(protected, nil, nil)
+	orders.RegisterRoutes(protected, nil)
+	dashboard.RegisterRoutes(protected, nil)
 	products.RegisterRoutes(open, protected, nil, nil, nil)
 	variants.RegisterRoutes(open, protected, nil, nil)
 	cart.RegisterRoutes(protected, nil, nil)
@@ -67,6 +71,9 @@ func TestBulkRoutesRegistered(t *testing.T) {
 		http.MethodGet + " /api/v1/reviews/me",
 		http.MethodPost + " /api/v1/wishlist/bulk",
 		http.MethodPost + " /api/v1/wishlist/bulk-delete",
+		http.MethodGet + " /api/v1/orders/aggregates",
+		http.MethodGet + " /api/v1/admin/orders/aggregates",
+		http.MethodGet + " /api/v1/admin/dashboard/overview",
 	}
 	for _, route := range want {
 		if !got[route] {
@@ -88,6 +95,8 @@ func TestAdminBulkRoutesForbidCustomers(t *testing.T) {
 		{http.MethodPost, "/api/v1/admin/products/bulk-delete"},
 		{http.MethodPost, "/api/v1/products/p1/variants/bulk"},
 		{http.MethodPatch, "/api/v1/admin/variants/bulk"},
+		{http.MethodGet, "/api/v1/admin/orders/aggregates"},
+		{http.MethodGet, "/api/v1/admin/dashboard/overview"},
 	}
 	for _, rt := range routes {
 		w := httptest.NewRecorder()

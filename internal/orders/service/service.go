@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	cartpublic "github.com/nikhea/malawi-e-commerce-store/internal/cart/public"
 	inventorypublic "github.com/nikhea/malawi-e-commerce-store/internal/inventory/public"
 	"github.com/nikhea/malawi-e-commerce-store/internal/orders/model"
@@ -20,6 +21,7 @@ type Repository interface {
 	Create(ctx context.Context, o model.Order, items []model.Item) (model.Order, error)
 	GetByID(ctx context.Context, orderID string) (model.Order, error)
 	ListByUser(ctx context.Context, userID string, f model.ListFilter) ([]model.Order, int64, error)
+	Aggregate(ctx context.Context, userID string, f model.AggregateFilter) (model.Aggregates, error)
 	MarkPaid(ctx context.Context, orderID string) (model.Order, error)
 	Cancel(ctx context.Context, orderID string) (model.Order, error)
 	GetItems(ctx context.Context, orderID string) ([]model.Item, error)
@@ -224,6 +226,102 @@ func (s *service) ListMine(ctx context.Context, userID string, f public.ListFilt
 		out = append(out, v)
 	}
 	return public.Page{Items: out, Meta: pagination.NewMeta(total, limit, offset)}, nil
+}
+
+// aggregateModel converts the repository's module-private totals into the
+// public wire shape. Slices are non-nil so an empty result serializes as []
+// rather than null.
+func aggregateModel(in model.Aggregates) public.Aggregates {
+	out := public.Aggregates{
+		Orders: public.OrdersAggregate{
+			Count:        in.Orders.Count,
+			FirstOrderAt: in.Orders.FirstOrderAt,
+			LastOrderAt:  in.Orders.LastOrderAt,
+			ByStatus:     make([]public.StatusTotal, 0, len(in.Orders.ByStatus)),
+			ByCurrency:   make([]public.CurrencyTotal, 0, len(in.Orders.ByCurrency)),
+		},
+		Items: public.ItemsAggregate{
+			Lines:             in.Items.Lines,
+			UnitsSold:         in.Items.UnitsSold,
+			RevenueByCurrency: make([]public.CurrencyRevenue, 0, len(in.Items.RevenueByCurrency)),
+			TopProducts:       make([]public.ProductTotal, 0, len(in.Items.TopProducts)),
+		},
+	}
+	for _, st := range in.Orders.ByStatus {
+		out.Orders.ByStatus = append(out.Orders.ByStatus, public.StatusTotal{
+			Status: st.Status, Currency: st.Currency, Orders: st.Orders,
+			TotalCents: st.TotalCents, AverageCents: st.AverageCents,
+		})
+	}
+	for _, ct := range in.Orders.ByCurrency {
+		out.Orders.ByCurrency = append(out.Orders.ByCurrency, public.CurrencyTotal{
+			Currency: ct.Currency, Orders: ct.Orders,
+			TotalCents: ct.TotalCents, AverageCents: ct.AverageCents,
+		})
+	}
+	for _, cr := range in.Items.RevenueByCurrency {
+		out.Items.RevenueByCurrency = append(out.Items.RevenueByCurrency, public.CurrencyRevenue{
+			Currency: cr.Currency, Lines: cr.Lines,
+			UnitsSold: cr.UnitsSold, RevenueCents: cr.RevenueCents,
+		})
+	}
+	for _, p := range in.Items.TopProducts {
+		out.Items.TopProducts = append(out.Items.TopProducts, public.ProductTotal{
+			ProductID: p.ProductID, Name: p.Name, SKU: p.SKU, Currency: p.Currency,
+			UnitsSold: p.UnitsSold, Orders: p.Orders, RevenueCents: p.RevenueCents,
+		})
+	}
+	return out
+}
+
+// aggregateFilter validates the shared query and normalizes it for the
+// repository. Status/currency casing is handled here, not in the handler.
+func aggregateFilter(f public.AggregateFilter) (model.AggregateFilter, error) {
+	status := strings.ToLower(strings.TrimSpace(f.Status))
+	switch status {
+	case "", public.StatusPending, public.StatusPaid, public.StatusCancelled:
+	default:
+		return model.AggregateFilter{}, apperr.Validation("status must be pending, paid or cancelled")
+	}
+	if f.CreatedAfter != nil && f.CreatedBefore != nil && f.CreatedAfter.After(*f.CreatedBefore) {
+		return model.AggregateFilter{}, apperr.Validation("created_after cannot be after created_before")
+	}
+	return model.AggregateFilter{
+		Status: status, Currency: strings.TrimSpace(f.Currency),
+		CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore,
+		TopProducts: public.TopProductsLimit,
+	}, nil
+}
+
+func (s *service) aggregate(ctx context.Context, userID string, f public.AggregateFilter) (public.Aggregates, error) {
+	mf, err := aggregateFilter(f)
+	if err != nil {
+		return public.Aggregates{}, err
+	}
+	in, err := s.repo.Aggregate(ctx, userID, mf)
+	if err != nil {
+		return public.Aggregates{}, err
+	}
+	return aggregateModel(in), nil
+}
+
+func (s *service) AggregateMine(ctx context.Context, userID string, f public.AggregateFilter) (public.Aggregates, error) {
+	if strings.TrimSpace(userID) == "" {
+		return public.Aggregates{}, apperr.Validation("user id is required")
+	}
+	return s.aggregate(ctx, userID, f)
+}
+
+func (s *service) AggregateAll(ctx context.Context, userID string, f public.AggregateFilter) (public.Aggregates, error) {
+	userID = strings.TrimSpace(userID)
+	if userID != "" {
+		// This value comes from a query string, not a token: reject garbage
+		// before handing it to a UUID column (which would surface as a 500).
+		if _, err := uuid.Parse(userID); err != nil {
+			return public.Aggregates{}, apperr.Validation("user_id must be a UUID")
+		}
+	}
+	return s.aggregate(ctx, userID, f)
 }
 
 func (s *service) Cancel(ctx context.Context, userID, orderID string) (public.Order, error) {

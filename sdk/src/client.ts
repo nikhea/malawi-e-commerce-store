@@ -2,6 +2,7 @@ import { Http, type HttpOptions, type Requester } from "./http";
 import { AuthApi } from "./resources/auth";
 import { UsersApi } from "./resources/users";
 import { CategoriesApi } from "./resources/categories";
+import { DashboardApi } from "./resources/dashboard";
 import { ProductsApi, VariantsApi } from "./resources/products";
 import { InventoryApi } from "./resources/inventory";
 import { WishlistApi } from "./resources/wishlist";
@@ -34,6 +35,7 @@ export class MalawiStoreClient {
   readonly auth: AuthApi;
   readonly users: UsersApi;
   readonly categories: CategoriesApi;
+  readonly dashboard: DashboardApi;
   readonly products: ProductsApi;
   readonly variants: VariantsApi;
   readonly inventory: InventoryApi;
@@ -50,6 +52,7 @@ export class MalawiStoreClient {
     this.auth = new AuthApi(this.requester);
     this.users = new UsersApi(this.requester);
     this.categories = new CategoriesApi(this.requester);
+    this.dashboard = new DashboardApi(this.requester);
     this.products = new ProductsApi(this.requester);
     this.variants = new VariantsApi(this.requester);
     this.inventory = new InventoryApi(this.requester);

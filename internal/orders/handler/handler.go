@@ -92,6 +92,98 @@ func (h *Handler) ListMine(c *gin.Context) {
 	response.OKMeta(c, page.Items, page.Meta)
 }
 
+// aggregateFilter binds the shared query filters. Date parsing lives here
+// (HTTP concern); status/currency normalization lives in the service.
+func aggregateFilter(q dto.AggregateOrdersQuery) (public.AggregateFilter, error) {
+	after, err := parseDateParam(q.CreatedAfter, false)
+	if err != nil {
+		return public.AggregateFilter{}, apperr.Validation("created_after must be RFC3339 or YYYY-MM-DD")
+	}
+	before, err := parseDateParam(q.CreatedBefore, true)
+	if err != nil {
+		return public.AggregateFilter{}, apperr.Validation("created_before must be RFC3339 or YYYY-MM-DD")
+	}
+	return public.AggregateFilter{
+		Status: q.Status, Currency: q.Currency,
+		CreatedAfter: after, CreatedBefore: before,
+	}, nil
+}
+
+// bindAggregate reads the aggregate query or writes a 400 and returns ok=false.
+func bindAggregate(c *gin.Context) (dto.AggregateOrdersQuery, public.AggregateFilter, bool) {
+	var q dto.AggregateOrdersQuery
+	if err := c.ShouldBindQuery(&q); err != nil {
+		response.Error(c, apperr.Validation("invalid query"))
+		return q, public.AggregateFilter{}, false
+	}
+	f, err := aggregateFilter(q)
+	if err != nil {
+		response.Error(c, err)
+		return q, public.AggregateFilter{}, false
+	}
+	return q, f, true
+}
+
+// AggregatesMine godoc
+// @Summary Aggregate my orders
+// @Description Order and line-item totals for the caller. Counts cover all matching rows; the product breakdown is the top 10 by units sold.
+// @Description Money is grouped by currency: legacy MWK is never added to USD.
+// @Tags orders
+// @Produce json
+// @Param status query string false "pending|paid|cancelled"
+// @Param currency query string false "Filter by currency (e.g. USD)"
+// @Param created_after query string false "Created at or after (RFC3339 or YYYY-MM-DD)"
+// @Param created_before query string false "Created at or before (RFC3339 or YYYY-MM-DD)"
+// @Success 200 {object} public.AggregatesResponse
+// @Failure 400 {object} response.ErrorResponse
+// @Failure 401 {object} response.ErrorResponse
+// @Security BearerAuth
+// @Router /orders/aggregates [get]
+func (h *Handler) AggregatesMine(c *gin.Context) {
+	_, f, ok := bindAggregate(c)
+	if !ok {
+		return
+	}
+	// user_id from the query is deliberately ignored here: identity comes
+	// from the token, never from the client.
+	aggregates, err := h.svc.AggregateMine(c.Request.Context(), middleware.UserIDOf(c), f)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+	response.OK(c, aggregates)
+}
+
+// AggregatesAll godoc
+// @Summary Aggregate all orders (admin)
+// @Description Order and line-item totals across every customer, optionally narrowed with user_id.
+// @Description Money is grouped by currency: legacy MWK is never added to USD.
+// @Tags admin-orders
+// @Produce json
+// @Param user_id query string false "Optional customer UUID; omit for all customers"
+// @Param status query string false "pending|paid|cancelled"
+// @Param currency query string false "Filter by currency (e.g. USD)"
+// @Param created_after query string false "Created at or after (RFC3339 or YYYY-MM-DD)"
+// @Param created_before query string false "Created at or before (RFC3339 or YYYY-MM-DD)"
+// @Success 200 {object} public.AggregatesResponse
+// @Failure 400 {object} response.ErrorResponse
+// @Failure 401 {object} response.ErrorResponse
+// @Failure 403 {object} response.ErrorResponse
+// @Security BearerAuth
+// @Router /admin/orders/aggregates [get]
+func (h *Handler) AggregatesAll(c *gin.Context) {
+	q, f, ok := bindAggregate(c)
+	if !ok {
+		return
+	}
+	aggregates, err := h.svc.AggregateAll(c.Request.Context(), q.UserID, f)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+	response.OK(c, aggregates)
+}
+
 // parseDateParam accepts RFC3339 timestamps and plain calendar dates.
 // A date-only created_before expands to the end of that day.
 func parseDateParam(raw string, endOfDay bool) (*time.Time, error) {

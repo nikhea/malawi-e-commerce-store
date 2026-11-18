@@ -23,6 +23,10 @@ type fakeRepo struct {
 	// onCancel runs inside Cancel, before the transition is applied. Tests
 	// use it to prove side effects happen after the status is claimed.
 	onCancel func(id string)
+	// aggregate call capture + canned result.
+	aggregateUser   string
+	aggregateFilter model.AggregateFilter
+	aggregateResult model.Aggregates
 }
 
 func newFakeRepo() *fakeRepo {
@@ -95,6 +99,12 @@ func (f *fakeRepo) Cancel(_ context.Context, id string) (model.Order, error) {
 
 func (f *fakeRepo) GetItems(_ context.Context, id string) ([]model.Item, error) {
 	return f.items[id], nil
+}
+
+func (f *fakeRepo) Aggregate(_ context.Context, userID string, filter model.AggregateFilter) (model.Aggregates, error) {
+	f.aggregateUser = userID
+	f.aggregateFilter = filter
+	return f.aggregateResult, nil
 }
 
 // fakeCart serves one stocked cart for "u1".
@@ -463,4 +473,95 @@ func TestSettleExpired(t *testing.T) {
 			t.Fatalf("release not retried: %+v", fx.inventory.released)
 		}
 	})
+}
+
+func TestAggregateMine(t *testing.T) {
+	ctx := context.Background()
+	fx := newFixture()
+	first := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	last := first.Add(48 * time.Hour)
+	fx.repo.aggregateResult = model.Aggregates{
+		Orders: model.OrdersAggregate{
+			Count: 3, FirstOrderAt: &first, LastOrderAt: &last,
+			ByStatus: []model.StatusTotal{
+				{Status: public.StatusPaid, Currency: "USD", Orders: 2, TotalCents: 3000, AverageCents: 1500},
+			},
+			ByCurrency: []model.CurrencyTotal{{Currency: "USD", Orders: 3, TotalCents: 4000, AverageCents: 1333}},
+		},
+		Items: model.ItemsAggregate{
+			Lines: 5, UnitsSold: 7,
+			RevenueByCurrency: []model.CurrencyRevenue{{Currency: "USD", Lines: 5, UnitsSold: 7, RevenueCents: 4000}},
+			TopProducts: []model.ProductTotal{
+				{ProductID: "p1", Name: "Oil", SKU: "OIL-1", Currency: "USD", UnitsSold: 7, Orders: 3, RevenueCents: 4000},
+			},
+		},
+	}
+	after, before := first, last
+	got, err := fx.svc.AggregateMine(ctx, "u1", public.AggregateFilter{
+		Status: " PAID ", Currency: " usd ", CreatedAfter: &after, CreatedBefore: &before,
+	})
+	if err != nil {
+		t.Fatalf("aggregate: %v", err)
+	}
+	if fx.repo.aggregateUser != "u1" {
+		t.Fatalf("aggregate not scoped to caller: %q", fx.repo.aggregateUser)
+	}
+	if fx.repo.aggregateFilter.Status != public.StatusPaid || fx.repo.aggregateFilter.Currency != "usd" {
+		t.Fatalf("filter not normalized: %+v", fx.repo.aggregateFilter)
+	}
+	if fx.repo.aggregateFilter.TopProducts != public.TopProductsLimit {
+		t.Fatalf("product limit missing: %+v", fx.repo.aggregateFilter)
+	}
+	if got.Orders.Count != 3 || got.Items.UnitsSold != 7 || len(got.Items.TopProducts) != 1 {
+		t.Fatalf("aggregate not mapped: %+v", got)
+	}
+	if got.Orders.ByStatus[0].AverageCents != 1500 || got.Items.RevenueByCurrency[0].RevenueCents != 4000 {
+		t.Fatalf("money fields not mapped: %+v", got)
+	}
+	if got.Orders.ByStatus == nil || got.Items.TopProducts == nil {
+		t.Fatal("empty slices must serialize as []")
+	}
+}
+
+func TestAggregateValidation(t *testing.T) {
+	ctx := context.Background()
+	fx := newFixture()
+
+	if _, err := fx.svc.AggregateMine(ctx, "  ", public.AggregateFilter{}); apperr.CodeOf(err) != apperr.CodeValidation {
+		t.Fatalf("missing identity: expected VALIDATION_ERROR, got %v", err)
+	}
+	if _, err := fx.svc.AggregateMine(ctx, "u1", public.AggregateFilter{Status: "refunded"}); apperr.CodeOf(err) != apperr.CodeValidation {
+		t.Fatalf("bad status: expected VALIDATION_ERROR, got %v", err)
+	}
+	after := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	before := after.Add(-24 * time.Hour)
+	if _, err := fx.svc.AggregateMine(ctx, "u1", public.AggregateFilter{CreatedAfter: &after, CreatedBefore: &before}); apperr.CodeOf(err) != apperr.CodeValidation {
+		t.Fatalf("inverted dates: expected VALIDATION_ERROR, got %v", err)
+	}
+}
+
+func TestAggregateAllUserFilter(t *testing.T) {
+	ctx := context.Background()
+	fx := newFixture()
+
+	// No user_id: all customers.
+	if _, err := fx.svc.AggregateAll(ctx, "", public.AggregateFilter{}); err != nil {
+		t.Fatalf("all customers: %v", err)
+	}
+	if fx.repo.aggregateUser != "" {
+		t.Fatalf("expected unscoped aggregate, got %q", fx.repo.aggregateUser)
+	}
+
+	const customer = "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+	if _, err := fx.svc.AggregateAll(ctx, customer, public.AggregateFilter{}); err != nil {
+		t.Fatalf("one customer: %v", err)
+	}
+	if fx.repo.aggregateUser != customer {
+		t.Fatalf("user_id not forwarded: %q", fx.repo.aggregateUser)
+	}
+
+	// A non-UUID from the query string must be a 400, not a DB error/500.
+	if _, err := fx.svc.AggregateAll(ctx, "not-a-uuid", public.AggregateFilter{}); apperr.CodeOf(err) != apperr.CodeValidation {
+		t.Fatalf("bad user_id: expected VALIDATION_ERROR, got %v", err)
+	}
 }

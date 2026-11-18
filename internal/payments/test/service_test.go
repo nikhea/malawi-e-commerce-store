@@ -102,6 +102,12 @@ func (f *fakeOrders) GetByRef(_ context.Context, orderID string) (orderspublic.O
 func (f *fakeOrders) ListMine(context.Context, string, orderspublic.ListFilter) (orderspublic.Page, error) {
 	return orderspublic.Page{}, nil
 }
+func (f *fakeOrders) AggregateMine(context.Context, string, orderspublic.AggregateFilter) (orderspublic.Aggregates, error) {
+	return orderspublic.Aggregates{}, nil
+}
+func (f *fakeOrders) AggregateAll(context.Context, string, orderspublic.AggregateFilter) (orderspublic.Aggregates, error) {
+	return orderspublic.Aggregates{}, nil
+}
 func (f *fakeOrders) Cancel(context.Context, string, string) (orderspublic.Order, error) {
 	return orderspublic.Order{}, nil
 }

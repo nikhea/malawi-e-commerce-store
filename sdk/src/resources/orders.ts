@@ -1,5 +1,11 @@
 import type { Requester } from "../http";
-import type { ListOrdersParams, Order, OrderListResponse } from "../types";
+import type {
+  AggregateOrdersParams,
+  ListOrdersParams,
+  Order,
+  OrderAggregates,
+  OrderListResponse,
+} from "../types";
 
 /**
  * /api/v1/orders — JWT required. Checkout takes NO body: it freezes the
@@ -21,6 +27,20 @@ export class OrdersApi {
   /** Same filters as `list`, plus the `meta` paging counters. */
   listPage(params?: ListOrdersParams): Promise<OrderListResponse> {
     return this.request("GET", "/orders", { query: params, raw: true });
+  }
+
+  /**
+   * Order + line-item totals for the current customer. Counts cover every
+   * matching row; `top_products` is the top 10 by units sold. Amounts are
+   * grouped by currency.
+   */
+  aggregates(params?: AggregateOrdersParams): Promise<OrderAggregates> {
+    return this.request("GET", "/orders/aggregates", { query: params });
+  }
+
+  /** Admin: all customers, or one via `params.user_id`. */
+  adminAggregates(params?: AggregateOrdersParams): Promise<OrderAggregates> {
+    return this.request("GET", "/admin/orders/aggregates", { query: params });
   }
 
   get(id: string): Promise<Order> {

@@ -24,6 +24,8 @@ import (
 	cartpublic "github.com/nikhea/malawi-e-commerce-store/internal/cart/public"
 	categories "github.com/nikhea/malawi-e-commerce-store/internal/categories"
 	categoriespublic "github.com/nikhea/malawi-e-commerce-store/internal/categories/public"
+	dashboard "github.com/nikhea/malawi-e-commerce-store/internal/dashboard"
+	dashboardpublic "github.com/nikhea/malawi-e-commerce-store/internal/dashboard/public"
 	inventory "github.com/nikhea/malawi-e-commerce-store/internal/inventory"
 	inventorypublic "github.com/nikhea/malawi-e-commerce-store/internal/inventory/public"
 	jobs "github.com/nikhea/malawi-e-commerce-store/internal/jobs"
@@ -64,6 +66,7 @@ import (
 type app struct {
 	usersSvc      userspublic.Service
 	categoriesSvc categoriespublic.Service
+	dashboardSvc  dashboardpublic.Service
 	variantsSvc   variantspublic.Service
 	productsSvc   productspublic.Service
 	cartSvc       cartpublic.Service
@@ -91,6 +94,8 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 
 	usersSvc := users.Wire(pool)
 	categoriesSvc := categories.Wire(pool)
+	// Read-only reporting projection: no sibling services, no cycle.
+	dashboardSvc := dashboard.Wire(pool)
 	inventorySvc := inventory.Wire(pool)
 	variantsSvc := variants.Wire(pool, inventorySvc)
 	productsSvc := products.Wire(pool, categoriesSvc, variantsSvc)
@@ -202,6 +207,7 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 	return &app{
 		usersSvc:      usersSvc,
 		categoriesSvc: categoriesSvc,
+		dashboardSvc:  dashboardSvc,
 		variantsSvc:   variantsSvc,
 		productsSvc:   productsSvc,
 		cartSvc:       cartSvc,
@@ -286,6 +292,7 @@ func registerRoutes(r *gin.Engine, a *app) {
 	cart.RegisterRoutes(protected, a.cartSvc, a.idemStore)
 	inventory.RegisterRoutes(protected, a.inventorySvc, a.idemStore)
 	orders.RegisterRoutes(protected, a.ordersSvc)
+	dashboard.RegisterRoutes(protected, a.dashboardSvc)
 	// Burst shield for Stripe retries: 120 webhook hits/min/IP. The HMAC
 	// stays the real authentication; this only absorbs floods.
 	webhooks := open.Group("/webhooks")

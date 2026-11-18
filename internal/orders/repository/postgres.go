@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -179,6 +180,173 @@ func orderOrder(sortKey string) string {
 	default: // newest
 		return "created_at DESC, id ASC"
 	}
+}
+
+// aggregateWhere builds the shared filter for the aggregate queries. An
+// empty userID omits the owner clause (admin scope). prefix is "o." for the
+// order_items join, empty for queries over orders alone.
+func aggregateWhere(userID string, f model.AggregateFilter, prefix string) (string, []any) {
+	col := func(name string) string {
+		if prefix == "" {
+			return name
+		}
+		return prefix + name
+	}
+	clauses := []string{}
+	args := []any{}
+	add := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+	if strings.TrimSpace(userID) != "" {
+		clauses = append(clauses, col("user_id")+" = "+add(userID))
+	}
+	if f.Status != "" {
+		clauses = append(clauses, col("status")+" = "+add(f.Status))
+	}
+	if f.Currency != "" {
+		clauses = append(clauses, "upper("+col("currency")+") = "+add(strings.ToUpper(f.Currency)))
+	}
+	if f.CreatedAfter != nil {
+		clauses = append(clauses, col("created_at")+" >= "+add(*f.CreatedAfter))
+	}
+	if f.CreatedBefore != nil {
+		clauses = append(clauses, col("created_at")+" <= "+add(*f.CreatedBefore))
+	}
+	if len(clauses) == 0 {
+		return "TRUE", args
+	}
+	return strings.Join(clauses, " AND "), args
+}
+
+// Aggregate collects the order-header and line-item summaries. Three small
+// grouped queries keep the math in Postgres: one over orders, one over the
+// joined lines for the ranked products, one over the joined lines for totals
+// that must NOT be truncated by the product limit. Money is grouped by
+// currency throughout so legacy MWK never mixes with USD.
+func (r *Postgres) Aggregate(ctx context.Context, userID string, f model.AggregateFilter) (model.Aggregates, error) {
+	var out model.Aggregates
+	out.Orders.ByStatus = []model.StatusTotal{}
+	out.Orders.ByCurrency = []model.CurrencyTotal{}
+	out.Items.RevenueByCurrency = []model.CurrencyRevenue{}
+	out.Items.TopProducts = []model.ProductTotal{}
+
+	where, args := aggregateWhere(userID, f, "")
+	q := `SELECT status, upper(currency), COUNT(*), COALESCE(SUM(subtotal_cents), 0),
+	             MIN(created_at), MAX(created_at)
+	      FROM orders WHERE ` + where + `
+	      GROUP BY status, upper(currency)
+	      ORDER BY status, upper(currency)`
+	rows, err := r.pool.Query(ctx, q, args...)
+	if err != nil {
+		return model.Aggregates{}, apperr.Internal(err)
+	}
+	currencyIdx := map[string]int{}
+	for rows.Next() {
+		var status, currency string
+		var orders int
+		var total int64
+		var first, last time.Time
+		if err := rows.Scan(&status, &currency, &orders, &total, &first, &last); err != nil {
+			rows.Close()
+			return model.Aggregates{}, apperr.Internal(err)
+		}
+		out.Orders.Count += orders
+		if out.Orders.FirstOrderAt == nil || first.Before(*out.Orders.FirstOrderAt) {
+			t := first
+			out.Orders.FirstOrderAt = &t
+		}
+		if out.Orders.LastOrderAt == nil || last.After(*out.Orders.LastOrderAt) {
+			t := last
+			out.Orders.LastOrderAt = &t
+		}
+		average := int64(0)
+		if orders > 0 {
+			average = total / int64(orders)
+		}
+		out.Orders.ByStatus = append(out.Orders.ByStatus, model.StatusTotal{
+			Status: status, Currency: currency, Orders: orders,
+			TotalCents: total, AverageCents: average,
+		})
+		i, ok := currencyIdx[currency]
+		if !ok {
+			out.Orders.ByCurrency = append(out.Orders.ByCurrency, model.CurrencyTotal{Currency: currency})
+			i = len(out.Orders.ByCurrency) - 1
+			currencyIdx[currency] = i
+		}
+		ct := &out.Orders.ByCurrency[i]
+		ct.Orders += orders
+		ct.TotalCents += total
+		if ct.Orders > 0 {
+			ct.AverageCents = ct.TotalCents / int64(ct.Orders)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return model.Aggregates{}, apperr.Internal(err)
+	}
+	rows.Close()
+
+	itemWhere, itemArgs := aggregateWhere(userID, f, "o.")
+	const joins = ` FROM order_items oi JOIN orders o ON o.id = oi.order_id WHERE `
+	productsQ := `SELECT oi.product_id, oi.name, oi.sku, upper(o.currency),
+	                      COALESCE(SUM(oi.qty), 0), COUNT(DISTINCT o.id),
+	                      COALESCE(SUM(oi.unit_price_cents * oi.qty), 0)` + joins + itemWhere +
+		` GROUP BY oi.product_id, oi.name, oi.sku, upper(o.currency)
+		  ORDER BY SUM(oi.qty) DESC, oi.product_id ASC`
+	limit := f.TopProducts
+	if limit <= 0 {
+		limit = 10
+	}
+	productArgs := append(append([]any{}, itemArgs...), limit)
+	productsQ += fmt.Sprintf(` LIMIT $%d`, len(productArgs))
+	productRows, err := r.pool.Query(ctx, productsQ, productArgs...)
+	if err != nil {
+		return model.Aggregates{}, apperr.Internal(err)
+	}
+	for productRows.Next() {
+		var p model.ProductTotal
+		var units int64
+		if err := productRows.Scan(&p.ProductID, &p.Name, &p.SKU, &p.Currency,
+			&units, &p.Orders, &p.RevenueCents); err != nil {
+			productRows.Close()
+			return model.Aggregates{}, apperr.Internal(err)
+		}
+		p.UnitsSold = int(units)
+		out.Items.TopProducts = append(out.Items.TopProducts, p)
+	}
+	if err := productRows.Err(); err != nil {
+		productRows.Close()
+		return model.Aggregates{}, apperr.Internal(err)
+	}
+	productRows.Close()
+
+	totalsQ := `SELECT upper(o.currency), COUNT(*), COALESCE(SUM(oi.qty), 0),
+	                   COALESCE(SUM(oi.unit_price_cents * oi.qty), 0)` + joins + itemWhere +
+		` GROUP BY upper(o.currency) ORDER BY upper(o.currency)`
+	totalRows, err := r.pool.Query(ctx, totalsQ, itemArgs...)
+	if err != nil {
+		return model.Aggregates{}, apperr.Internal(err)
+	}
+	for totalRows.Next() {
+		var cr model.CurrencyRevenue
+		var lines, units int64
+		if err := totalRows.Scan(&cr.Currency, &lines, &units, &cr.RevenueCents); err != nil {
+			totalRows.Close()
+			return model.Aggregates{}, apperr.Internal(err)
+		}
+		cr.Lines = int(lines)
+		cr.UnitsSold = int(units)
+		out.Items.Lines += cr.Lines
+		out.Items.UnitsSold += cr.UnitsSold
+		out.Items.RevenueByCurrency = append(out.Items.RevenueByCurrency, cr)
+	}
+	if err := totalRows.Err(); err != nil {
+		totalRows.Close()
+		return model.Aggregates{}, apperr.Internal(err)
+	}
+	totalRows.Close()
+	return out, nil
 }
 
 // transition moves a pending order to status, returning the order. Any

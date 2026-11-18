@@ -176,7 +176,8 @@ try {
 | `store.inventory` | `/admin/inventory/*` (stock, reserve, release, confirm) |
 | `store.wishlist` | `/wishlist` (note: `remove()` takes the **product** id) |
 | `store.cart` | `/cart`, `/cart/items/:id` (line ids) |
-| `store.orders` | `/orders/checkout`, `/orders`, `/orders/:id`, `/orders/:id/cancel` |
+| `store.orders` | `/orders/checkout`, `/orders`, `/orders/:id`, `/orders/:id/cancel`, `/orders/aggregates`, `/admin/orders/aggregates` |
+| `store.dashboard` | `/admin/dashboard/overview` |
 | `store.payments` | `/payments/intents` |
 | `store.reviews` | `/products/:id/reviews`, `/reviews/:id`, `/admin/reviews/:id` |
 | `store.health` | `/health` (raw, no envelope) |
