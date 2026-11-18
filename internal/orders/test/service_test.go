@@ -3,6 +3,7 @@ package test
 import (
 	"context"
 	"fmt"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/bulk"
 	"testing"
 	"time"
 
@@ -19,6 +20,13 @@ type fakeRepo struct {
 	orders map[string]model.Order
 	items  map[string][]model.Item
 	seq    int
+	// onCancel runs inside Cancel, before the transition is applied. Tests
+	// use it to prove side effects happen after the status is claimed.
+	onCancel func(id string)
+	// aggregate call capture + canned result.
+	aggregateUser   string
+	aggregateFilter model.AggregateFilter
+	aggregateResult model.Aggregates
 }
 
 func newFakeRepo() *fakeRepo {
@@ -83,11 +91,20 @@ func (f *fakeRepo) MarkPaid(_ context.Context, id string) (model.Order, error) {
 }
 
 func (f *fakeRepo) Cancel(_ context.Context, id string) (model.Order, error) {
+	if f.onCancel != nil {
+		f.onCancel(id)
+	}
 	return f.transition(id, public.StatusCancelled)
 }
 
 func (f *fakeRepo) GetItems(_ context.Context, id string) ([]model.Item, error) {
 	return f.items[id], nil
+}
+
+func (f *fakeRepo) Aggregate(_ context.Context, userID string, filter model.AggregateFilter) (model.Aggregates, error) {
+	f.aggregateUser = userID
+	f.aggregateFilter = filter
+	return f.aggregateResult, nil
 }
 
 // fakeCart serves one stocked cart for "u1".
@@ -112,6 +129,9 @@ func (f *fakeCart) Get(_ context.Context, userID string) (cartpublic.Cart, error
 func (f *fakeCart) AddItem(context.Context, cartpublic.AddItemInput) (cartpublic.Cart, error) {
 	return cartpublic.Cart{}, nil
 }
+func (f *fakeCart) BulkAdd(context.Context, string, []cartpublic.BulkAddItem, bool) ([]bulk.BulkResult[cartpublic.Line], cartpublic.Cart, error) {
+	return nil, cartpublic.Cart{}, nil
+}
 func (f *fakeCart) List(context.Context, string, cartpublic.ListFilter) (cartpublic.Page, error) {
 	return cartpublic.Page{}, nil
 }
@@ -131,11 +151,18 @@ type fakeInventory struct {
 	reserved    []string
 	released    []string
 	confirmed   []string
+	extended    []string
 	failReserve bool
 }
 
 func (f *fakeInventory) SetStock(context.Context, string, *string, int) (inventorypublic.Stock, error) {
 	return inventorypublic.Stock{}, nil
+}
+func (f *fakeInventory) BulkSetStock(context.Context, []inventorypublic.BulkStockItem, bool) ([]bulk.BulkResult[inventorypublic.Stock], error) {
+	return nil, nil
+}
+func (f *fakeInventory) GetStockByVariants(context.Context, []string) ([]inventorypublic.Stock, []string, error) {
+	return nil, nil, nil
 }
 func (f *fakeInventory) GetStock(context.Context, string, *string) (inventorypublic.Stock, error) {
 	return inventorypublic.Stock{}, nil
@@ -159,12 +186,18 @@ func (f *fakeInventory) ConfirmByOrder(_ context.Context, orderRef string) error
 	return nil
 }
 
-func (f *fakeInventory) ReleaseExpired(_ context.Context) ([]string, error) {
+func (f *fakeInventory) ExtendReservation(_ context.Context, orderRef string, ttl time.Duration) (time.Time, error) {
+	f.extended = append(f.extended, orderRef)
+	return time.Now().Add(ttl), nil
+}
+
+func (f *fakeInventory) ExpiredReservations(_ context.Context) ([]string, error) {
 	return nil, nil
 }
 
 type fixture struct {
 	svc       public.Service
+	repo      *fakeRepo
 	cart      *fakeCart
 	inventory *fakeInventory
 	notify    *fakeNotifier
@@ -190,8 +223,9 @@ func (f *fakeNotifier) OrderCancelled(_ context.Context, o public.Order) {
 }
 
 func newFixture() *fixture {
-	fx := &fixture{cart: &fakeCart{}, inventory: &fakeInventory{}, notify: &fakeNotifier{}}
-	fx.svc = service.NewService(newFakeRepo(), fx.cart, fx.inventory, fx.notify, service.Config{})
+	repo := newFakeRepo()
+	fx := &fixture{repo: repo, cart: &fakeCart{}, inventory: &fakeInventory{}, notify: &fakeNotifier{}}
+	fx.svc = service.NewService(repo, fx.cart, fx.inventory, fx.notify, service.Config{})
 	return fx
 }
 
@@ -302,9 +336,13 @@ func TestPayCancel(t *testing.T) {
 	if len(fx.inventory.confirmed) != 1 || len(fx.notify.paid) != 1 || fx.notify.paid[0] != order.ID {
 		t.Fatalf("pay side effects wrong: %+v %+v", fx.inventory.confirmed, fx.notify.paid)
 	}
-	// Repeat pay succeeds (idempotent).
+	// Repeat pay succeeds (idempotent) and re-runs the stock confirm: a
+	// first attempt may have flipped the order and crashed before settling.
 	if _, err := fx.svc.MarkPaid(ctx, order.ID); err != nil {
 		t.Fatalf("repeat pay: %v", err)
+	}
+	if len(fx.inventory.confirmed) != 2 {
+		t.Fatalf("repeat pay must re-confirm stock: %+v", fx.inventory.confirmed)
 	}
 	// Paid order can't cancel.
 	if _, err := fx.svc.Cancel(ctx, "u1", order.ID); apperr.CodeOf(err) != apperr.CodeConflict {
@@ -322,5 +360,208 @@ func TestPayCancel(t *testing.T) {
 	}
 	if len(fx.inventory.released) != 1 {
 		t.Fatalf("release missing: %+v", fx.inventory.released)
+	}
+}
+
+func TestCancelClaimsTransitionBeforeRelease(t *testing.T) {
+	ctx := context.Background()
+	fx := newFixture()
+	order, err := fx.svc.Checkout(ctx, "u1")
+	if err != nil {
+		t.Fatalf("checkout: %v", err)
+	}
+	fx.repo.onCancel = func(string) {
+		// The guarded pending → cancelled claim must happen before stock is
+		// freed; otherwise a concurrent MarkPaid can leave a paid order
+		// with released stock.
+		if len(fx.inventory.released) != 0 {
+			t.Errorf("stock released before the order transition was claimed")
+		}
+	}
+	if _, err := fx.svc.Cancel(ctx, "u1", order.ID); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if len(fx.inventory.released) != 1 {
+		t.Fatalf("release missing: %+v", fx.inventory.released)
+	}
+}
+
+func TestExtendCheckoutHold(t *testing.T) {
+	ctx := context.Background()
+	fx := newFixture()
+	order, err := fx.svc.Checkout(ctx, "u1")
+	if err != nil {
+		t.Fatalf("checkout: %v", err)
+	}
+	deadline, err := fx.svc.ExtendCheckoutHold(ctx, order.ID)
+	if err != nil {
+		t.Fatalf("extend: %v", err)
+	}
+	if len(fx.inventory.extended) != 1 || fx.inventory.extended[0] != order.ID {
+		t.Fatalf("hold not extended: %+v", fx.inventory.extended)
+	}
+	if time.Until(deadline) <= 0 {
+		t.Fatalf("deadline not in the future: %v", deadline)
+	}
+
+	// Paid orders are terminal: no hold to extend.
+	if _, err := fx.svc.MarkPaid(ctx, order.ID); err != nil {
+		t.Fatalf("pay: %v", err)
+	}
+	if _, err := fx.svc.ExtendCheckoutHold(ctx, order.ID); apperr.CodeOf(err) != apperr.CodeConflict {
+		t.Fatalf("expected CONFLICT for a paid order, got %v", err)
+	}
+}
+
+func TestSettleExpired(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("pending order cancels and releases", func(t *testing.T) {
+		fx := newFixture()
+		order, err := fx.svc.Checkout(ctx, "u1")
+		if err != nil {
+			t.Fatalf("checkout: %v", err)
+		}
+		if err := fx.svc.SettleExpired(ctx, order.ID); err != nil {
+			t.Fatalf("settle: %v", err)
+		}
+		if len(fx.inventory.released) != 1 {
+			t.Fatalf("hold not released: %+v", fx.inventory.released)
+		}
+		got, err := fx.svc.GetByRef(ctx, order.ID)
+		if err != nil || got.Status != public.StatusCancelled {
+			t.Fatalf("order not cancelled: %v %+v", err, got)
+		}
+	})
+
+	t.Run("paid order confirms instead of releasing", func(t *testing.T) {
+		fx := newFixture()
+		order, err := fx.svc.Checkout(ctx, "u1")
+		if err != nil {
+			t.Fatalf("checkout: %v", err)
+		}
+		if _, err := fx.svc.MarkPaid(ctx, order.ID); err != nil {
+			t.Fatalf("pay: %v", err)
+		}
+		before := len(fx.inventory.released)
+		if err := fx.svc.SettleExpired(ctx, order.ID); err != nil {
+			t.Fatalf("settle: %v", err)
+		}
+		if len(fx.inventory.released) != before {
+			t.Fatalf("paid order released stock: %+v", fx.inventory.released)
+		}
+		// MarkPaid confirmed once; settlement confirms again (no-op in
+		// the real settle because the holds are already terminal).
+		if len(fx.inventory.confirmed) != 2 {
+			t.Fatalf("paid hold not confirmed: %+v", fx.inventory.confirmed)
+		}
+	})
+
+	t.Run("already cancelled releases idempotently", func(t *testing.T) {
+		fx := newFixture()
+		order, err := fx.svc.Checkout(ctx, "u1")
+		if err != nil {
+			t.Fatalf("checkout: %v", err)
+		}
+		if _, err := fx.svc.Cancel(ctx, "u1", order.ID); err != nil {
+			t.Fatalf("cancel: %v", err)
+		}
+		if err := fx.svc.SettleExpired(ctx, order.ID); err != nil {
+			t.Fatalf("settle: %v", err)
+		}
+		if len(fx.inventory.released) != 2 {
+			t.Fatalf("release not retried: %+v", fx.inventory.released)
+		}
+	})
+}
+
+func TestAggregateMine(t *testing.T) {
+	ctx := context.Background()
+	fx := newFixture()
+	first := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	last := first.Add(48 * time.Hour)
+	fx.repo.aggregateResult = model.Aggregates{
+		Orders: model.OrdersAggregate{
+			Count: 3, FirstOrderAt: &first, LastOrderAt: &last,
+			ByStatus: []model.StatusTotal{
+				{Status: public.StatusPaid, Currency: "USD", Orders: 2, TotalCents: 3000, AverageCents: 1500},
+			},
+			ByCurrency: []model.CurrencyTotal{{Currency: "USD", Orders: 3, TotalCents: 4000, AverageCents: 1333}},
+		},
+		Items: model.ItemsAggregate{
+			Lines: 5, UnitsSold: 7,
+			RevenueByCurrency: []model.CurrencyRevenue{{Currency: "USD", Lines: 5, UnitsSold: 7, RevenueCents: 4000}},
+			TopProducts: []model.ProductTotal{
+				{ProductID: "p1", Name: "Oil", SKU: "OIL-1", Currency: "USD", UnitsSold: 7, Orders: 3, RevenueCents: 4000},
+			},
+		},
+	}
+	after, before := first, last
+	got, err := fx.svc.AggregateMine(ctx, "u1", public.AggregateFilter{
+		Status: " PAID ", Currency: " usd ", CreatedAfter: &after, CreatedBefore: &before,
+	})
+	if err != nil {
+		t.Fatalf("aggregate: %v", err)
+	}
+	if fx.repo.aggregateUser != "u1" {
+		t.Fatalf("aggregate not scoped to caller: %q", fx.repo.aggregateUser)
+	}
+	if fx.repo.aggregateFilter.Status != public.StatusPaid || fx.repo.aggregateFilter.Currency != "usd" {
+		t.Fatalf("filter not normalized: %+v", fx.repo.aggregateFilter)
+	}
+	if fx.repo.aggregateFilter.TopProducts != public.TopProductsLimit {
+		t.Fatalf("product limit missing: %+v", fx.repo.aggregateFilter)
+	}
+	if got.Orders.Count != 3 || got.Items.UnitsSold != 7 || len(got.Items.TopProducts) != 1 {
+		t.Fatalf("aggregate not mapped: %+v", got)
+	}
+	if got.Orders.ByStatus[0].AverageCents != 1500 || got.Items.RevenueByCurrency[0].RevenueCents != 4000 {
+		t.Fatalf("money fields not mapped: %+v", got)
+	}
+	if got.Orders.ByStatus == nil || got.Items.TopProducts == nil {
+		t.Fatal("empty slices must serialize as []")
+	}
+}
+
+func TestAggregateValidation(t *testing.T) {
+	ctx := context.Background()
+	fx := newFixture()
+
+	if _, err := fx.svc.AggregateMine(ctx, "  ", public.AggregateFilter{}); apperr.CodeOf(err) != apperr.CodeValidation {
+		t.Fatalf("missing identity: expected VALIDATION_ERROR, got %v", err)
+	}
+	if _, err := fx.svc.AggregateMine(ctx, "u1", public.AggregateFilter{Status: "refunded"}); apperr.CodeOf(err) != apperr.CodeValidation {
+		t.Fatalf("bad status: expected VALIDATION_ERROR, got %v", err)
+	}
+	after := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	before := after.Add(-24 * time.Hour)
+	if _, err := fx.svc.AggregateMine(ctx, "u1", public.AggregateFilter{CreatedAfter: &after, CreatedBefore: &before}); apperr.CodeOf(err) != apperr.CodeValidation {
+		t.Fatalf("inverted dates: expected VALIDATION_ERROR, got %v", err)
+	}
+}
+
+func TestAggregateAllUserFilter(t *testing.T) {
+	ctx := context.Background()
+	fx := newFixture()
+
+	// No user_id: all customers.
+	if _, err := fx.svc.AggregateAll(ctx, "", public.AggregateFilter{}); err != nil {
+		t.Fatalf("all customers: %v", err)
+	}
+	if fx.repo.aggregateUser != "" {
+		t.Fatalf("expected unscoped aggregate, got %q", fx.repo.aggregateUser)
+	}
+
+	const customer = "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+	if _, err := fx.svc.AggregateAll(ctx, customer, public.AggregateFilter{}); err != nil {
+		t.Fatalf("one customer: %v", err)
+	}
+	if fx.repo.aggregateUser != customer {
+		t.Fatalf("user_id not forwarded: %q", fx.repo.aggregateUser)
+	}
+
+	// A non-UUID from the query string must be a 400, not a DB error/500.
+	if _, err := fx.svc.AggregateAll(ctx, "not-a-uuid", public.AggregateFilter{}); apperr.CodeOf(err) != apperr.CodeValidation {
+		t.Fatalf("bad user_id: expected VALIDATION_ERROR, got %v", err)
 	}
 }

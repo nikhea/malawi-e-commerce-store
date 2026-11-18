@@ -107,6 +107,7 @@ type fakeAuthRepo struct {
 	refresh       map[string]string // tokenHash → userID
 	revoked       map[string]bool
 	replaced      map[string]string // oldHash → newHash
+	rotateErr     error             // injected rotation race loser
 }
 
 func newFakeAuthRepo() *fakeAuthRepo {
@@ -160,6 +161,9 @@ func (f *fakeAuthRepo) GetRefresh(_ context.Context, tokenHash string) (model.Re
 }
 
 func (f *fakeAuthRepo) RotateRefresh(_ context.Context, oldID, newID string) error {
+	if f.rotateErr != nil {
+		return f.rotateErr
+	}
 	for hash := range f.refresh {
 		if "id-"+hash == oldID {
 			f.revoked[hash] = true
@@ -195,6 +199,7 @@ func (f *fakeAuthRepo) RefreshUsedElsewhere(_ context.Context, tokenHash string)
 type fixture struct {
 	svc    authpublic.Service
 	users  *fakeUsers
+	repo   *fakeAuthRepo
 	mailer *fakeMailer
 }
 
@@ -221,8 +226,9 @@ func (f *fakeMailer) SendReset(_ context.Context, userID, email, name, token str
 }
 
 func newFixture() *fixture {
-	fx := &fixture{users: newFakeUsers(), mailer: &fakeMailer{}}
-	fx.svc = service.NewService(fx.users, newFakeAuthRepo(), fx.mailer, service.Config{
+	repo := newFakeAuthRepo()
+	fx := &fixture{users: newFakeUsers(), repo: repo, mailer: &fakeMailer{}}
+	fx.svc = service.NewService(fx.users, repo, fx.mailer, service.Config{
 		Secret:      "test-secret",
 		TTL:         time.Hour,
 		AdminEmails: map[string]struct{}{"boss@malawi.mw": {}},
@@ -478,5 +484,31 @@ func TestRefreshRotation(t *testing.T) {
 	}
 	if err := fx2.svc.Logout(ctx, "ghost"); err != nil {
 		t.Fatalf("unknown logout should succeed: %v", err)
+	}
+}
+
+func TestRefreshRotationRaceLosesCleanly(t *testing.T) {
+	ctx := context.Background()
+	fx := newFixture()
+	pair, err := fx.svc.Register(ctx, authpublic.RegisterInput{
+		Email: "race@malawi.mw", Name: "R", Password: "password1",
+	})
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	// A concurrent refresh wins between GetRefresh and RotateRefresh: the
+	// compare-and-swap reports CONFLICT and this call must respond as theft.
+	fx.repo.rotateErr = apperr.Conflict("refresh token already rotated")
+	if _, err := fx.svc.Refresh(ctx, pair.RefreshToken); apperr.CodeOf(err) != apperr.CodeUnauthorized {
+		t.Fatalf("expected UNAUTHORIZED, got %v", err)
+	}
+
+	// The loser minted a replacement before rotating; it must be revoked,
+	// not left as a live orphan, and the whole chain must be dead.
+	for hash := range fx.repo.refresh {
+		if !fx.repo.revoked[hash] {
+			t.Fatalf("refresh token left live after losing the rotation race: %s", hash)
+		}
 	}
 }

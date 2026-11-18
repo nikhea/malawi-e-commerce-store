@@ -96,6 +96,54 @@ func (r *Postgres) ListByProduct(ctx context.Context, productID string, f model.
 	return out, total, nil
 }
 
+// ListByUser returns one page of the caller's reviews with product context,
+// plus the total under the same owner predicate. Newest first by default.
+func (r *Postgres) ListByUser(ctx context.Context, userID string, f model.ListFilter) ([]model.MyReviewRow, int64, error) {
+	const from = ` FROM reviews r JOIN products p ON p.id = r.product_id`
+	const countQ = `SELECT COUNT(*)` + from + ` WHERE r.user_id = $1`
+	var total int64
+	if err := r.pool.QueryRow(ctx, countQ, userID).Scan(&total); err != nil {
+		return nil, 0, apperr.Internal(err)
+	}
+
+	const cols = `r.id, r.user_id, r.author, r.product_id, r.rating, r.title, r.body,
+	              r.created_at, r.updated_at, p.name, p.slug, COALESCE(p.image_url, '')`
+	q := `SELECT ` + cols + from + ` WHERE r.user_id = $1 ORDER BY ` +
+		myReviewOrder(f.Sort) + ` LIMIT $2 OFFSET $3`
+	rows, err := r.pool.Query(ctx, q, userID, f.Limit, f.Offset)
+	if err != nil {
+		return nil, 0, apperr.Internal(err)
+	}
+	defer rows.Close()
+	out := []model.MyReviewRow{}
+	for rows.Next() {
+		var rev model.MyReviewRow
+		if err := rows.Scan(&rev.ID, &rev.UserID, &rev.Author, &rev.ProductID, &rev.Rating,
+			&rev.Title, &rev.Body, &rev.CreatedAt, &rev.UpdatedAt,
+			&rev.ProductName, &rev.ProductSlug, &rev.ProductImageURL); err != nil {
+			return nil, 0, apperr.Internal(err)
+		}
+		out = append(out, rev)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, apperr.Internal(err)
+	}
+	return out, total, nil
+}
+
+func myReviewOrder(sortKey string) string {
+	switch sortKey {
+	case "oldest":
+		return "r.created_at ASC, r.id ASC"
+	case "highest":
+		return "r.rating DESC, r.created_at DESC, r.id ASC"
+	case "lowest":
+		return "r.rating ASC, r.created_at DESC, r.id ASC"
+	default: // newest
+		return "r.created_at DESC, r.id ASC"
+	}
+}
+
 func reviewWhere(productID string, f model.ListFilter) (string, []any) {
 	clauses := []string{"product_id = $1"}
 	args := []any{productID}

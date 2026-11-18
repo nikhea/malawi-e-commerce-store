@@ -13,6 +13,14 @@ type Stock struct {
 	UpdatedAt time.Time
 }
 
+// StockInput is one set-stock write. VariantID nil targets the product's
+// base stock row.
+type StockInput struct {
+	ProductID string
+	VariantID *string
+	Qty       int
+}
+
 // Reservation is a reservations ledger row. Module-private.
 type Reservation struct {
 	ID        string

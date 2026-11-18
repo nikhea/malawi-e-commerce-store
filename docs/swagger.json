@@ -258,6 +258,43 @@
                 }
             }
         },
+        "/admin/dashboard/overview": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Whole-store snapshot: catalog, customers, paying customers, order statuses, reservation/fulfillment states, stock health, payments, review summary and the top ordered/wishlisted/carted products.\nMoney stays grouped by currency; legacy MWK is never added to USD. Orders have no shipping states, so fulfillment is reported from inventory reservations.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-dashboard"
+                ],
+                "summary": "Admin dashboard overview",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/public.OverviewResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/admin/inventory/confirm": {
             "post": {
                 "security": [
@@ -451,6 +488,7 @@
                         "BearerAuth": []
                     }
                 ],
+                "description": "With variantIds, returns one row per variant (comma lists or\nrepeated query params, cap MAX_BULK_ITEMS) plus the ids that do\nnot resolve to a variant. Without variantIds the single\nproduct_id read is unchanged.",
                 "produces": [
                     "application/json"
                 ],
@@ -461,23 +499,32 @@
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Product ID",
+                        "description": "Product ID (single read)",
                         "name": "product_id",
-                        "in": "query",
-                        "required": true
+                        "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "Variant ID",
+                        "description": "Variant ID (single read)",
                         "name": "variant_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "csv",
+                        "description": "Variant IDs (comma separated or repeated)",
+                        "name": "variantIds",
                         "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "OK",
+                        "description": "Variant batch read",
                         "schema": {
-                            "$ref": "#/definitions/public.Stock"
+                            "$ref": "#/definitions/dto.BulkStockResponse"
                         }
                     },
                     "400": {
@@ -561,6 +608,150 @@
                 }
             }
         },
+        "/admin/inventory/stock/bulk": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Per-item results; HTTP 200 for a processed batch. With\natomic=true every line commits or the whole batch rolls back.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Set on-hand stock for many SKUs (admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Replay-safe request key (24h)",
+                        "name": "Idempotency-Key",
+                        "in": "header"
+                    },
+                    {
+                        "description": "Stock lines",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.BulkSetStockRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dto.BulkSetStockResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/orders/aggregates": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Order and line-item totals across every customer, optionally narrowed with user_id.\nMoney is grouped by currency: legacy MWK is never added to USD.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-orders"
+                ],
+                "summary": "Aggregate all orders (admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Optional customer UUID; omit for all customers",
+                        "name": "user_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "pending|paid|cancelled",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by currency (e.g. USD)",
+                        "name": "currency",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Created at or after (RFC3339 or YYYY-MM-DD)",
+                        "name": "created_after",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Created at or before (RFC3339 or YYYY-MM-DD)",
+                        "name": "created_before",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/public.AggregatesResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/admin/products": {
             "post": {
                 "security": [
@@ -616,6 +807,211 @@
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/products/bulk": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Per-item results in a 200 envelope. Duplicate generated slugs\nreject the whole request; a DB slug collision is per item.\ndryRun validates and projects the rows without writing.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Create products in bulk (admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Replay-safe request key (24h)",
+                        "name": "Idempotency-Key",
+                        "in": "header"
+                    },
+                    {
+                        "description": "Products",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.BulkCreateProductsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dto.BulkCreateProductsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "One partial patch per product; slug stays immutable. An empty\npatch is a per-item validation error. Duplicate ids reject the\nwhole request; dryRun projects without writing.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Update products in bulk (admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Replay-safe request key (24h)",
+                        "name": "Idempotency-Key",
+                        "in": "header"
+                    },
+                    {
+                        "description": "Patches",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.BulkUpdateProductsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dto.BulkUpdateProductsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/products/bulk-delete": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Max 25 ids. Products referenced by order history are blocked\nper item (CONFLICT); variants, gallery, inventory, carts and\nwishlists cascade. dryRun reports wouldDelete and blockers\nwithout writing.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Delete products in bulk (admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Replay-safe request key (24h)",
+                        "name": "Idempotency-Key",
+                        "in": "header"
+                    },
+                    {
+                        "description": "Ids",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.BulkDeleteProductsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dto.BulkDeleteProductsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/response.ErrorResponse"
                         }
@@ -1216,6 +1612,58 @@
                 }
             }
         },
+        "/admin/users/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns one account wrapped in the standard {\"data\"} envelope.\nAdmin-only: the public read was removed to stop PII enumeration.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "Get user by ID (admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/public.User"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/admin/users/{id}/role": {
             "patch": {
                 "security": [
@@ -1279,6 +1727,75 @@
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/variants/bulk": {
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "One partial patch per variant; product_id and sku stay\nimmutable. An empty patch is a per-item validation error.\nDuplicate ids reject the whole request. Availability is read\nbefore writes; dryRun projects without writing.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Update variants in bulk (admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Replay-safe request key (24h)",
+                        "name": "Idempotency-Key",
+                        "in": "header"
+                    },
+                    {
+                        "description": "Patches",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.BulkUpdateVariantsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dto.BulkUpdateVariantsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/response.ErrorResponse"
                         }
@@ -1916,6 +2433,75 @@
                 }
             }
         },
+        "/cart/items/bulk": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Max 25 lines. Identity comes from the JWT. Duplicate\nproduct/variant lines reject the whole request. Non-atomic\nbatches report invalid lines per item and keep going; atomic\nbatches validate first and write all lines in one transaction.\nThe response carries the full updated cart.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "cart"
+                ],
+                "summary": "Add items in bulk",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Replay-safe request key (24h)",
+                        "name": "Idempotency-Key",
+                        "in": "header"
+                    },
+                    {
+                        "description": "Lines",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.BulkAddItemsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dto.BulkAddCartResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/cart/items/{id}": {
             "delete": {
                 "security": [
@@ -2267,6 +2853,69 @@
                 }
             }
         },
+        "/orders/aggregates": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Order and line-item totals for the caller. Counts cover all matching rows; the product breakdown is the top 10 by units sold.\nMoney is grouped by currency: legacy MWK is never added to USD.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "orders"
+                ],
+                "summary": "Aggregate my orders",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "pending|paid|cancelled",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by currency (e.g. USD)",
+                        "name": "currency",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Created at or after (RFC3339 or YYYY-MM-DD)",
+                        "name": "created_after",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Created at or before (RFC3339 or YYYY-MM-DD)",
+                        "name": "created_before",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/public.AggregatesResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/orders/checkout": {
             "post": {
                 "security": [
@@ -2548,6 +3197,16 @@
                         "type": "string",
                         "description": "Full-text search over name, description and slug (word prefixes; substring fallback)",
                         "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "csv",
+                        "description": "Restrict to product ids (comma separated or repeated, max MAX_BULK_ITEMS)",
+                        "name": "ids",
                         "in": "query"
                     },
                     {
@@ -2965,6 +3624,151 @@
                 }
             }
         },
+        "/products/{id}/variants/bulk": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Per-item results in a 200 envelope. The product must exist\n(whole-request 404). SKUs are uppercased like single create;\nduplicate SKUs in the batch reject the request, while a DB SKU\ncollision is a per-item CONFLICT. dryRun projects without\nwriting; atomic inserts every SKU in one transaction.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Create variants in bulk (admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Product ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Replay-safe request key (24h)",
+                        "name": "Idempotency-Key",
+                        "in": "header"
+                    },
+                    {
+                        "description": "SKUs",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.BulkCreateVariantsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dto.BulkCreateVariantsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/reviews/me": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Caller's own reviews with product context, newest first by\ndefault. Sends {\"data\": [reviews], \"meta\": {page, limit, …}}.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reviews"
+                ],
+                "summary": "List my reviews",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "newest|oldest|highest|lowest",
+                        "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "1-based page (wins over offset)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size (default 12, max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page offset",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/public.MyReviewsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/reviews/{id}": {
             "delete": {
                 "security": [
@@ -3094,41 +3898,6 @@
                         "description": "Unauthorized",
                         "schema": {
                             "$ref": "#/definitions/response.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/response.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/users/{id}": {
-            "get": {
-                "description": "Returns one account wrapped in the standard {\"data\"} envelope.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "users"
-                ],
-                "summary": "Get user by ID",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "User ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/public.User"
                         }
                     },
                     "404": {
@@ -3311,6 +4080,132 @@
                 }
             }
         },
+        "/wishlist/bulk": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Max 50 product ids. Unknown or inactive products are per-item\nNOT_FOUND; already-hearted rows succeed with alreadyExists.\nDuplicate ids reject the whole request. atomic inserts every\nnew link in one transaction.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "wishlist"
+                ],
+                "summary": "Heart products in bulk",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Replay-safe request key (24h)",
+                        "name": "Idempotency-Key",
+                        "in": "header"
+                    },
+                    {
+                        "description": "Products",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.BulkAddWishlistRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dto.BulkAddWishlistResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/wishlist/bulk-delete": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Max 50 product ids (not wishlist row ids), matching single\nDELETE /wishlist/{id}. Unknown products are per-item NOT_FOUND;\nknown-but-not-hearted rows succeed with alreadyRemoved. dryRun\nreports wouldDelete without writing; atomic removes all rows in\none transaction.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "wishlist"
+                ],
+                "summary": "Unheart products in bulk",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Replay-safe request key (24h)",
+                        "name": "Idempotency-Key",
+                        "in": "header"
+                    },
+                    {
+                        "description": "Product ids",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.BulkRemoveWishlistRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dto.BulkRemoveWishlistResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/response.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/wishlist/{id}": {
             "delete": {
                 "security": [
@@ -3370,7 +4265,10 @@
                 "FORBIDDEN",
                 "CONFLICT",
                 "RATE_LIMITED",
-                "INTERNAL"
+                "INTERNAL",
+                "BULK_LIMIT_EXCEEDED",
+                "DUPLICATE_ITEM",
+                "IDEMPOTENCY_CONFLICT"
             ],
             "x-enum-varnames": [
                 "CodeNotFound",
@@ -3379,8 +4277,45 @@
                 "CodeForbidden",
                 "CodeConflict",
                 "CodeRateLimited",
-                "CodeInternal"
+                "CodeInternal",
+                "CodeBulkLimitExceeded",
+                "CodeDuplicateItem",
+                "CodeIdempotencyConflict"
             ]
+        },
+        "bulk.BulkItemError": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/apperr.Code"
+                        }
+                    ],
+                    "example": "NOT_FOUND"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "product not found"
+                }
+            }
+        },
+        "bulk.BulkSummary": {
+            "type": "object",
+            "properties": {
+                "failed": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "succeeded": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "total": {
+                    "type": "integer",
+                    "example": 2
+                }
+            }
         },
         "dto.AddItemRequest": {
             "type": "object",
@@ -3410,6 +4345,621 @@
                 "product_id": {
                     "type": "string",
                     "example": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                }
+            }
+        },
+        "dto.BulkAddCartResponse": {
+            "type": "object",
+            "properties": {
+                "cart": {
+                    "$ref": "#/definitions/public.Cart"
+                },
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.BulkAddResult"
+                    }
+                },
+                "summary": {
+                    "$ref": "#/definitions/bulk.BulkSummary"
+                }
+            }
+        },
+        "dto.BulkAddItemsRequest": {
+            "type": "object",
+            "required": [
+                "items"
+            ],
+            "properties": {
+                "atomic": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.AddItemRequest"
+                    }
+                }
+            }
+        },
+        "dto.BulkAddResult": {
+            "type": "object",
+            "properties": {
+                "alreadyExists": {
+                    "type": "boolean"
+                },
+                "alreadyRemoved": {
+                    "type": "boolean"
+                },
+                "blockers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "data": {
+                    "$ref": "#/definitions/public.Line"
+                },
+                "error": {
+                    "$ref": "#/definitions/bulk.BulkItemError"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "index": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "status": {
+                    "type": "string",
+                    "example": "ok"
+                },
+                "wouldDelete": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "dto.BulkAddWishlistRequest": {
+            "type": "object",
+            "required": [
+                "productIds"
+            ],
+            "properties": {
+                "atomic": {
+                    "type": "boolean"
+                },
+                "productIds": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "dto.BulkAddWishlistResponse": {
+            "type": "object",
+            "properties": {
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.BulkWishlistResult"
+                    }
+                },
+                "summary": {
+                    "$ref": "#/definitions/bulk.BulkSummary"
+                }
+            }
+        },
+        "dto.BulkCreateProductsRequest": {
+            "type": "object",
+            "required": [
+                "items"
+            ],
+            "properties": {
+                "atomic": {
+                    "type": "boolean"
+                },
+                "dryRun": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.CreateProductRequest"
+                    }
+                }
+            }
+        },
+        "dto.BulkCreateProductsResponse": {
+            "type": "object",
+            "properties": {
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.BulkProductResult"
+                    }
+                },
+                "summary": {
+                    "$ref": "#/definitions/bulk.BulkSummary"
+                }
+            }
+        },
+        "dto.BulkCreateVariantsRequest": {
+            "type": "object",
+            "required": [
+                "items"
+            ],
+            "properties": {
+                "atomic": {
+                    "type": "boolean"
+                },
+                "dryRun": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.CreateVariantRequest"
+                    }
+                }
+            }
+        },
+        "dto.BulkCreateVariantsResponse": {
+            "type": "object",
+            "properties": {
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.BulkVariantResult"
+                    }
+                },
+                "summary": {
+                    "$ref": "#/definitions/bulk.BulkSummary"
+                }
+            }
+        },
+        "dto.BulkDeleteProductsRequest": {
+            "type": "object",
+            "required": [
+                "ids"
+            ],
+            "properties": {
+                "atomic": {
+                    "type": "boolean"
+                },
+                "dryRun": {
+                    "type": "boolean"
+                },
+                "ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "dto.BulkDeleteProductsResponse": {
+            "type": "object",
+            "properties": {
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.BulkDeleteResult"
+                    }
+                },
+                "summary": {
+                    "$ref": "#/definitions/bulk.BulkSummary"
+                }
+            }
+        },
+        "dto.BulkDeleteResult": {
+            "type": "object",
+            "properties": {
+                "alreadyRemoved": {
+                    "type": "boolean"
+                },
+                "blockers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "error": {
+                    "$ref": "#/definitions/bulk.BulkItemError"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "index": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "status": {
+                    "type": "string",
+                    "example": "ok"
+                },
+                "wouldDelete": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "dto.BulkProductResult": {
+            "type": "object",
+            "properties": {
+                "alreadyExists": {
+                    "type": "boolean"
+                },
+                "alreadyRemoved": {
+                    "type": "boolean"
+                },
+                "blockers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "data": {
+                    "$ref": "#/definitions/public.Product"
+                },
+                "error": {
+                    "$ref": "#/definitions/bulk.BulkItemError"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "index": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "status": {
+                    "type": "string",
+                    "example": "ok"
+                },
+                "wouldDelete": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "dto.BulkRemoveWishlistRequest": {
+            "type": "object",
+            "required": [
+                "ids"
+            ],
+            "properties": {
+                "atomic": {
+                    "type": "boolean"
+                },
+                "dryRun": {
+                    "type": "boolean"
+                },
+                "ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "dto.BulkRemoveWishlistResponse": {
+            "type": "object",
+            "properties": {
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.BulkWishlistDeleteResult"
+                    }
+                },
+                "summary": {
+                    "$ref": "#/definitions/bulk.BulkSummary"
+                }
+            }
+        },
+        "dto.BulkSetStockItem": {
+            "type": "object",
+            "required": [
+                "product_id"
+            ],
+            "properties": {
+                "product_id": {
+                    "type": "string",
+                    "example": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                },
+                "qty": {
+                    "type": "integer",
+                    "example": 120
+                },
+                "variant_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.BulkSetStockRequest": {
+            "type": "object",
+            "required": [
+                "items"
+            ],
+            "properties": {
+                "atomic": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.BulkSetStockItem"
+                    }
+                }
+            }
+        },
+        "dto.BulkSetStockResponse": {
+            "type": "object",
+            "properties": {
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.BulkSetStockResult"
+                    }
+                },
+                "summary": {
+                    "$ref": "#/definitions/bulk.BulkSummary"
+                }
+            }
+        },
+        "dto.BulkSetStockResult": {
+            "type": "object",
+            "properties": {
+                "alreadyExists": {
+                    "type": "boolean"
+                },
+                "alreadyRemoved": {
+                    "type": "boolean"
+                },
+                "blockers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "data": {
+                    "$ref": "#/definitions/public.Stock"
+                },
+                "error": {
+                    "$ref": "#/definitions/bulk.BulkItemError"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "index": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "status": {
+                    "type": "string",
+                    "example": "ok"
+                },
+                "wouldDelete": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "dto.BulkStockResponse": {
+            "type": "object",
+            "properties": {
+                "notFound": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "stock": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.Stock"
+                    }
+                }
+            }
+        },
+        "dto.BulkUpdateProductItem": {
+            "type": "object",
+            "required": [
+                "id",
+                "patch"
+            ],
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "example": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                },
+                "patch": {
+                    "$ref": "#/definitions/dto.UpdateProductRequest"
+                }
+            }
+        },
+        "dto.BulkUpdateProductsRequest": {
+            "type": "object",
+            "required": [
+                "updates"
+            ],
+            "properties": {
+                "atomic": {
+                    "type": "boolean"
+                },
+                "dryRun": {
+                    "type": "boolean"
+                },
+                "updates": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.BulkUpdateProductItem"
+                    }
+                }
+            }
+        },
+        "dto.BulkUpdateProductsResponse": {
+            "type": "object",
+            "properties": {
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.BulkProductResult"
+                    }
+                },
+                "summary": {
+                    "$ref": "#/definitions/bulk.BulkSummary"
+                }
+            }
+        },
+        "dto.BulkUpdateVariantItem": {
+            "type": "object",
+            "required": [
+                "id",
+                "patch"
+            ],
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "example": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                },
+                "patch": {
+                    "$ref": "#/definitions/dto.UpdateVariantRequest"
+                }
+            }
+        },
+        "dto.BulkUpdateVariantsRequest": {
+            "type": "object",
+            "required": [
+                "updates"
+            ],
+            "properties": {
+                "atomic": {
+                    "type": "boolean"
+                },
+                "dryRun": {
+                    "type": "boolean"
+                },
+                "updates": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.BulkUpdateVariantItem"
+                    }
+                }
+            }
+        },
+        "dto.BulkUpdateVariantsResponse": {
+            "type": "object",
+            "properties": {
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.BulkVariantResult"
+                    }
+                },
+                "summary": {
+                    "$ref": "#/definitions/bulk.BulkSummary"
+                }
+            }
+        },
+        "dto.BulkVariantResult": {
+            "type": "object",
+            "properties": {
+                "alreadyExists": {
+                    "type": "boolean"
+                },
+                "alreadyRemoved": {
+                    "type": "boolean"
+                },
+                "blockers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "data": {
+                    "$ref": "#/definitions/public.Variant"
+                },
+                "error": {
+                    "$ref": "#/definitions/bulk.BulkItemError"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "index": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "status": {
+                    "type": "string",
+                    "example": "ok"
+                },
+                "wouldDelete": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "dto.BulkWishlistDeleteResult": {
+            "type": "object",
+            "properties": {
+                "alreadyRemoved": {
+                    "type": "boolean"
+                },
+                "blockers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "error": {
+                    "$ref": "#/definitions/bulk.BulkItemError"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "index": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "status": {
+                    "type": "string",
+                    "example": "ok"
+                },
+                "wouldDelete": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "dto.BulkWishlistResult": {
+            "type": "object",
+            "properties": {
+                "alreadyExists": {
+                    "type": "boolean"
+                },
+                "alreadyRemoved": {
+                    "type": "boolean"
+                },
+                "blockers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "data": {
+                    "$ref": "#/definitions/public.Item"
+                },
+                "error": {
+                    "$ref": "#/definitions/bulk.BulkItemError"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "index": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "status": {
+                    "type": "string",
+                    "example": "ok"
+                },
+                "wouldDelete": {
+                    "type": "boolean"
                 }
             }
         },
@@ -3840,6 +5390,25 @@
                 }
             }
         },
+        "public.Aggregates": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "$ref": "#/definitions/public.ItemsAggregate"
+                },
+                "orders": {
+                    "$ref": "#/definitions/public.OrdersAggregate"
+                }
+            }
+        },
+        "public.AggregatesResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/public.Aggregates"
+                }
+            }
+        },
         "public.Cart": {
             "type": "object",
             "properties": {
@@ -3875,6 +5444,52 @@
                 },
                 "meta": {
                     "$ref": "#/definitions/pagination.Meta"
+                }
+            }
+        },
+        "public.CartedProduct": {
+            "type": "object",
+            "properties": {
+                "cart_qty": {
+                    "type": "integer"
+                },
+                "carts": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "product_id": {
+                    "type": "string"
+                },
+                "slug": {
+                    "type": "string"
+                }
+            }
+        },
+        "public.Catalog": {
+            "type": "object",
+            "properties": {
+                "active_products": {
+                    "type": "integer"
+                },
+                "active_variants": {
+                    "type": "integer"
+                },
+                "inactive_products": {
+                    "type": "integer"
+                },
+                "ready_images": {
+                    "type": "integer"
+                },
+                "total_categories": {
+                    "type": "integer"
+                },
+                "total_products": {
+                    "type": "integer"
+                },
+                "total_variants": {
+                    "type": "integer"
                 }
             }
         },
@@ -3940,6 +5555,112 @@
                 }
             }
         },
+        "public.CurrencyOrderTotal": {
+            "type": "object",
+            "properties": {
+                "currency": {
+                    "type": "string",
+                    "example": "USD"
+                },
+                "orders": {
+                    "type": "integer"
+                },
+                "total_cents": {
+                    "type": "integer"
+                }
+            }
+        },
+        "public.CurrencyRevenue": {
+            "type": "object",
+            "properties": {
+                "currency": {
+                    "type": "string",
+                    "example": "USD"
+                },
+                "lines": {
+                    "type": "integer",
+                    "example": 12
+                },
+                "revenue_cents": {
+                    "type": "integer",
+                    "example": 12500
+                },
+                "units_sold": {
+                    "type": "integer",
+                    "example": 23
+                }
+            }
+        },
+        "public.CurrencyTotal": {
+            "type": "object",
+            "properties": {
+                "average_cents": {
+                    "type": "integer",
+                    "example": 2500
+                },
+                "currency": {
+                    "type": "string",
+                    "example": "USD"
+                },
+                "orders": {
+                    "type": "integer",
+                    "example": 5
+                },
+                "total_cents": {
+                    "type": "integer",
+                    "example": 12500
+                }
+            }
+        },
+        "public.Customers": {
+            "type": "object",
+            "properties": {
+                "new_customers_30d": {
+                    "type": "integer"
+                },
+                "paying_customers": {
+                    "type": "integer"
+                },
+                "succeeded_payment_customers": {
+                    "type": "integer"
+                },
+                "total_admins": {
+                    "type": "integer"
+                },
+                "total_customers": {
+                    "type": "integer"
+                },
+                "total_users": {
+                    "type": "integer"
+                },
+                "verified_customers": {
+                    "type": "integer"
+                }
+            }
+        },
+        "public.Demand": {
+            "type": "object",
+            "properties": {
+                "most_carted": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.CartedProduct"
+                    }
+                },
+                "most_ordered": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.OrderedProduct"
+                    }
+                },
+                "most_wishlisted": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.WishlistedProduct"
+                    }
+                }
+            }
+        },
         "public.Detail": {
             "type": "object",
             "properties": {
@@ -3958,6 +5679,32 @@
                     "items": {
                         "$ref": "#/definitions/public.VariantView"
                     }
+                }
+            }
+        },
+        "public.Fulfillment": {
+            "type": "object",
+            "properties": {
+                "active_reservations": {
+                    "type": "integer"
+                },
+                "active_reserved_qty": {
+                    "type": "integer"
+                },
+                "confirmed_qty": {
+                    "type": "integer"
+                },
+                "confirmed_reservations": {
+                    "type": "integer"
+                },
+                "expired_active_holds": {
+                    "type": "integer"
+                },
+                "released_qty": {
+                    "type": "integer"
+                },
+                "released_reservations": {
+                    "type": "integer"
                 }
             }
         },
@@ -4010,6 +5757,31 @@
                 }
             }
         },
+        "public.ItemsAggregate": {
+            "type": "object",
+            "properties": {
+                "lines": {
+                    "type": "integer",
+                    "example": 12
+                },
+                "revenue_by_currency": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.CurrencyRevenue"
+                    }
+                },
+                "top_products": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.ProductTotal"
+                    }
+                },
+                "units_sold": {
+                    "type": "integer",
+                    "example": 23
+                }
+            }
+        },
         "public.Line": {
             "type": "object",
             "properties": {
@@ -4045,6 +5817,74 @@
                 },
                 "variant_id": {
                     "type": "string"
+                }
+            }
+        },
+        "public.MyReview": {
+            "type": "object",
+            "properties": {
+                "body": {
+                    "type": "string",
+                    "example": "Lasted the whole month"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "product": {
+                    "$ref": "#/definitions/public.MyReviewProduct"
+                },
+                "product_id": {
+                    "type": "string"
+                },
+                "rating": {
+                    "type": "integer",
+                    "example": 5
+                },
+                "title": {
+                    "type": "string",
+                    "example": "Great oil"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "public.MyReviewProduct": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "image_url": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Sunseed Cooking Oil 2L"
+                },
+                "slug": {
+                    "type": "string",
+                    "example": "sunseed-cooking-oil-2l"
+                }
+            }
+        },
+        "public.MyReviewsResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.MyReview"
+                    }
+                },
+                "meta": {
+                    "$ref": "#/definitions/pagination.Meta"
                 }
             }
         },
@@ -4119,6 +5959,132 @@
                 }
             }
         },
+        "public.OrderedProduct": {
+            "type": "object",
+            "properties": {
+                "currency": {
+                    "type": "string",
+                    "example": "USD"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "orders": {
+                    "type": "integer"
+                },
+                "product_id": {
+                    "type": "string"
+                },
+                "revenue_cents": {
+                    "type": "integer"
+                },
+                "sku": {
+                    "type": "string"
+                },
+                "units_sold": {
+                    "type": "integer"
+                }
+            }
+        },
+        "public.Orders": {
+            "type": "object",
+            "properties": {
+                "by_currency": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.CurrencyOrderTotal"
+                    }
+                },
+                "cancelled": {
+                    "type": "integer"
+                },
+                "last_30d": {
+                    "type": "integer"
+                },
+                "paid": {
+                    "type": "integer"
+                },
+                "paid_revenue_by_currency": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.CurrencyOrderTotal"
+                    }
+                },
+                "pending": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "public.OrdersAggregate": {
+            "type": "object",
+            "properties": {
+                "by_currency": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.CurrencyTotal"
+                    }
+                },
+                "by_status": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.StatusTotal"
+                    }
+                },
+                "count": {
+                    "type": "integer",
+                    "example": 5
+                },
+                "first_order_at": {
+                    "type": "string"
+                },
+                "last_order_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "public.Overview": {
+            "type": "object",
+            "properties": {
+                "catalog": {
+                    "$ref": "#/definitions/public.Catalog"
+                },
+                "customers": {
+                    "$ref": "#/definitions/public.Customers"
+                },
+                "demand": {
+                    "$ref": "#/definitions/public.Demand"
+                },
+                "fulfillment": {
+                    "$ref": "#/definitions/public.Fulfillment"
+                },
+                "generated_at": {
+                    "type": "string"
+                },
+                "orders": {
+                    "$ref": "#/definitions/public.Orders"
+                },
+                "payments": {
+                    "$ref": "#/definitions/public.Payments"
+                },
+                "reviews": {
+                    "$ref": "#/definitions/public.Reviews"
+                },
+                "stock": {
+                    "$ref": "#/definitions/public.StockHealth"
+                }
+            }
+        },
+        "public.OverviewResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/public.Overview"
+                }
+            }
+        },
         "public.Payment": {
             "type": "object",
             "properties": {
@@ -4152,6 +6118,39 @@
                 },
                 "stripe_intent_id": {
                     "type": "string"
+                }
+            }
+        },
+        "public.PaymentStatusTotal": {
+            "type": "object",
+            "properties": {
+                "charged_cents": {
+                    "type": "integer"
+                },
+                "currency": {
+                    "type": "string",
+                    "example": "USD"
+                },
+                "original_order_cents": {
+                    "type": "integer"
+                },
+                "payments": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "succeeded"
+                }
+            }
+        },
+        "public.Payments": {
+            "type": "object",
+            "properties": {
+                "by_status": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/public.PaymentStatusTotal"
+                    }
                 }
             }
         },
@@ -4241,6 +6240,36 @@
                 }
             }
         },
+        "public.ProductTotal": {
+            "type": "object",
+            "properties": {
+                "currency": {
+                    "type": "string",
+                    "example": "USD"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "orders": {
+                    "type": "integer",
+                    "example": 4
+                },
+                "product_id": {
+                    "type": "string"
+                },
+                "revenue_cents": {
+                    "type": "integer",
+                    "example": 12000
+                },
+                "sku": {
+                    "type": "string"
+                },
+                "units_sold": {
+                    "type": "integer",
+                    "example": 12
+                }
+            }
+        },
         "public.Review": {
             "type": "object",
             "properties": {
@@ -4274,6 +6303,20 @@
                 }
             }
         },
+        "public.Reviews": {
+            "type": "object",
+            "properties": {
+                "average_rating": {
+                    "type": "number"
+                },
+                "last_30d": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
         "public.Role": {
             "type": "string",
             "enum": [
@@ -4284,6 +6327,31 @@
                 "RoleAdmin",
                 "RoleCustomer"
             ]
+        },
+        "public.StatusTotal": {
+            "type": "object",
+            "properties": {
+                "average_cents": {
+                    "type": "integer",
+                    "example": 2500
+                },
+                "currency": {
+                    "type": "string",
+                    "example": "USD"
+                },
+                "orders": {
+                    "type": "integer",
+                    "example": 5
+                },
+                "status": {
+                    "type": "string",
+                    "example": "paid"
+                },
+                "total_cents": {
+                    "type": "integer",
+                    "example": 12500
+                }
+            }
         },
         "public.Stock": {
             "type": "object",
@@ -4305,6 +6373,26 @@
                 },
                 "variant_id": {
                     "type": "string"
+                }
+            }
+        },
+        "public.StockHealth": {
+            "type": "object",
+            "properties": {
+                "available_qty": {
+                    "type": "integer"
+                },
+                "on_hand_qty": {
+                    "type": "integer"
+                },
+                "out_of_stock_rows": {
+                    "type": "integer"
+                },
+                "reserved_qty": {
+                    "type": "integer"
+                },
+                "rows": {
+                    "type": "integer"
                 }
             }
         },
@@ -4491,6 +6579,23 @@
                 },
                 "meta": {
                     "$ref": "#/definitions/pagination.Meta"
+                }
+            }
+        },
+        "public.WishlistedProduct": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "product_id": {
+                    "type": "string"
+                },
+                "slug": {
+                    "type": "string"
+                },
+                "wishlists": {
+                    "type": "integer"
                 }
             }
         },

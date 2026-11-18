@@ -23,14 +23,18 @@ func New(svc public.Service) *Handler {
 }
 
 // GetByID godoc
-// @Summary Get user by ID
+// @Summary Get user by ID (admin)
 // @Description Returns one account wrapped in the standard {"data"} envelope.
+// @Description Admin-only: the public read was removed to stop PII enumeration.
 // @Tags users
 // @Produce json
 // @Param id path string true "User ID"
 // @Success 200 {object} public.User
+// @Failure 401 {object} response.ErrorResponse
+// @Failure 403 {object} response.ErrorResponse
 // @Failure 404 {object} response.ErrorResponse
-// @Router /users/{id} [get]
+// @Security BearerAuth
+// @Router /admin/users/{id} [get]
 func (h *Handler) GetByID(c *gin.Context) {
 	u, err := h.svc.GetByID(c.Request.Context(), c.Param("id"))
 	if err != nil {

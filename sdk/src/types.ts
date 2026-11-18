@@ -36,6 +36,39 @@ export type PaginationMeta = {
 /** Raw paged envelope: `{ data: rows, meta: counters }`. */
 export type Paginated<T> = { data: T[]; meta: PaginationMeta };
 
+/** Batch outcome: only `"ok"` items count as succeeded. */
+export type BulkSummary = { total: number; succeeded: number; failed: number };
+
+/** One machine-readable per-item failure inside a 200 batch response. */
+export type BulkItemError = { code: string; message: string };
+
+/**
+ * One item's outcome. Results are index-aligned with the request so a
+ * client can match failures back to its input. `rolled_back` means an
+ * atomic batch aborted and nothing was written.
+ */
+export type BulkResult<T> = {
+  index: number;
+  id?: string;
+  status: "ok" | "error" | "rolled_back";
+  data?: T;
+  error?: BulkItemError;
+  /** Idempotent customer writes: the thing was already there. */
+  alreadyExists?: boolean;
+  /** Idempotent customer writes: the thing was already gone. */
+  alreadyRemoved?: boolean;
+  /** dryRun only: the row would have been deleted. */
+  wouldDelete?: boolean;
+  /** dryRun only: what would cascade or block the delete. */
+  blockers?: string[];
+};
+
+/** Standard batch payload: per-item results plus counters. */
+export type BulkResponse<T> = { results: BulkResult<T>[]; summary: BulkSummary };
+
+/** Payload for delete-style batch items (no entity to return). */
+export type BulkEmpty = Record<string, never>;
+
 // ---------------------------------------------------------------------------
 // auth — /api/v1/auth (public, rate-limited 10/min/IP)
 // ---------------------------------------------------------------------------
@@ -177,6 +210,8 @@ export type ListProductsParams = {
    * full-text finds nothing.
    */
   q?: string;
+  /** Restrict to product ids (comma-separated; max MAX_BULK_ITEMS). */
+  ids?: string;
   category_id?: string;
   category_slug?: string;
   min_price_cents?: number;
@@ -271,6 +306,39 @@ export type UpdateProductInput = {
   clear_category?: boolean;
 };
 
+/** POST /admin/products/bulk. Cap MAX_BULK_ITEMS (default 50). */
+export type BulkCreateProductsInput = {
+  atomic?: boolean;
+  dryRun?: boolean;
+  items: CreateProductInput[];
+};
+
+export type BulkUpdateProductItem = {
+  id: string;
+  patch: UpdateProductInput;
+};
+
+/** PATCH /admin/products/bulk. Duplicate ids reject the whole request. */
+export type BulkUpdateProductsInput = {
+  atomic?: boolean;
+  dryRun?: boolean;
+  updates: BulkUpdateProductItem[];
+};
+
+/**
+ * POST /admin/products/bulk-delete (capped at 25). Products referenced by
+ * order history are blocked per item with `CONFLICT`.
+ */
+export type BulkDeleteProductsInput = {
+  ids: string[];
+  dryRun?: boolean;
+  atomic?: boolean;
+};
+
+export type BulkCreateProductsResponse = BulkResponse<Product>;
+export type BulkUpdateProductsResponse = BulkResponse<Product>;
+export type BulkDeleteProductsResponse = BulkResponse<BulkEmpty>;
+
 export type Variant = {
   id: string;
   product_id: string;
@@ -296,6 +364,32 @@ export type UpdateVariantInput = {
   price_cents?: number;
   is_active?: boolean;
 };
+
+/**
+ * POST /products/{id}/variants/bulk. Cap MAX_BULK_ITEMS (default 50).
+ * The product must exist (whole-request 404); duplicate SKUs reject the
+ * whole batch.
+ */
+export type BulkCreateVariantsInput = {
+  atomic?: boolean;
+  dryRun?: boolean;
+  items: CreateVariantInput[];
+};
+
+export type BulkUpdateVariantItem = {
+  id: string;
+  patch: UpdateVariantInput;
+};
+
+/** PATCH /admin/variants/bulk. Duplicate ids reject the whole request. */
+export type BulkUpdateVariantsInput = {
+  atomic?: boolean;
+  dryRun?: boolean;
+  updates: BulkUpdateVariantItem[];
+};
+
+export type BulkCreateVariantsResponse = BulkResponse<Variant>;
+export type BulkUpdateVariantsResponse = BulkResponse<Variant>;
 
 // ---------------------------------------------------------------------------
 // inventory — /api/v1/admin/inventory (admin only)
@@ -370,6 +464,22 @@ export type ListWishlistParams = {
 
 export type WishlistListResponse = Paginated<WishlistItem>;
 
+/** POST /wishlist/bulk. Field is camelCase per the API spec. */
+export type BulkAddWishlistInput = {
+  productIds: string[];
+  atomic?: boolean;
+};
+
+/** POST /wishlist/bulk-delete. Ids are product ids, not wishlist row ids. */
+export type BulkRemoveWishlistInput = {
+  ids: string[];
+  dryRun?: boolean;
+  atomic?: boolean;
+};
+
+export type BulkAddWishlistResponse = BulkResponse<WishlistItem>;
+export type BulkRemoveWishlistResponse = BulkResponse<BulkEmpty>;
+
 // ---------------------------------------------------------------------------
 // cart — /api/v1/cart (JWT)
 // ---------------------------------------------------------------------------
@@ -403,6 +513,21 @@ export type AddCartItemInput = {
 };
 
 export type SetQtyInput = { qty: number };
+
+/**
+ * POST /cart/items/bulk. Capped at 25 lines; duplicate product/variant
+ * lines reject the whole request.
+ */
+export type BulkAddCartItemsInput = {
+  atomic?: boolean;
+  items: AddCartItemInput[];
+};
+
+/**
+ * Bulk envelope for a batch add plus the full cart after the batch, so the
+ * client never has to re-fetch.
+ */
+export type BulkAddCartResponse = BulkResponse<CartLine> & { cart: Cart };
 
 export type CartSort =
   | "oldest"
@@ -476,6 +601,144 @@ export type ListOrdersParams = {
 
 export type OrderListResponse = Paginated<Order>;
 
+/** Shared filters for both aggregate endpoints. `user_id` is admin-only. */
+export type AggregateOrdersParams = {
+  status?: OrderStatus;
+  currency?: string;
+  /** RFC3339 or YYYY-MM-DD. */
+  created_after?: string;
+  /** RFC3339 or YYYY-MM-DD; a date-only value includes the whole day. */
+  created_before?: string;
+  /** Admin only: optional customer UUID. Omit to aggregate every customer. */
+  user_id?: string;
+};
+
+/** Money is grouped by currency: legacy MWK is never added to USD. */
+export type OrderStatusTotal = {
+  status: OrderStatus;
+  currency: string;
+  orders: number;
+  total_cents: number;
+  average_cents: number;
+};
+
+export type OrderCurrencyTotal = {
+  currency: string;
+  orders: number;
+  total_cents: number;
+  average_cents: number;
+};
+
+export type OrderAggregate = {
+  count: number;
+  first_order_at?: string;
+  last_order_at?: string;
+  by_status: OrderStatusTotal[];
+  by_currency: OrderCurrencyTotal[];
+};
+
+export type ProductTotal = {
+  product_id: string;
+  name: string;
+  sku?: string;
+  currency: string;
+  units_sold: number;
+  orders: number;
+  revenue_cents: number;
+};
+
+export type CurrencyRevenue = {
+  currency: string;
+  lines: number;
+  units_sold: number;
+  revenue_cents: number;
+};
+
+export type ItemsAggregate = {
+  lines: number;
+  units_sold: number;
+  revenue_by_currency: CurrencyRevenue[];
+  /** Ranked by units sold, capped at 10 by the server. */
+  top_products: ProductTotal[];
+};
+
+/** GET /orders/aggregates and GET /admin/orders/aggregates (`data` payload). */
+export type OrderAggregates = {
+  orders: OrderAggregate;
+  items: ItemsAggregate;
+};
+
+// ---------------------------------------------------------------------------
+// dashboard — /api/v1/admin/dashboard/overview (admin only)
+// ---------------------------------------------------------------------------
+
+/** Whole-store snapshot. Money is grouped by currency, never summed across currencies. */
+export type DashboardOverview = {
+  generated_at: string;
+  catalog: {
+    total_products: number;
+    active_products: number;
+    inactive_products: number;
+    total_variants: number;
+    active_variants: number;
+    total_categories: number;
+    ready_images: number;
+  };
+  customers: {
+    total_users: number;
+    total_customers: number;
+    verified_customers: number;
+    total_admins: number;
+    new_customers_30d: number;
+    paying_customers: number;
+    succeeded_payment_customers: number;
+  };
+  orders: {
+    total: number;
+    pending: number;
+    paid: number;
+    cancelled: number;
+    last_30d: number;
+    by_currency: { currency: string; orders: number; total_cents: number }[];
+    paid_revenue_by_currency: { currency: string; orders: number; total_cents: number }[];
+  };
+  /** Orders have no shipping states; these are inventory reservation counts. */
+  fulfillment: {
+    active_reservations: number;
+    confirmed_reservations: number;
+    released_reservations: number;
+    active_reserved_qty: number;
+    confirmed_qty: number;
+    released_qty: number;
+    expired_active_holds: number;
+  };
+  stock: {
+    rows: number;
+    on_hand_qty: number;
+    reserved_qty: number;
+    available_qty: number;
+    out_of_stock_rows: number;
+  };
+  reviews: { total: number; average_rating: number; last_30d: number };
+  payments: {
+    by_status: {
+      status: "pending" | "succeeded" | "failed" | "cancelled";
+      currency: string;
+      payments: number;
+      charged_cents: number;
+      original_order_cents: number;
+    }[];
+  };
+  demand: {
+    /** Ranked by units in paid orders, top 5. */
+    most_ordered: ProductTotal[];
+    /** Ranked by wishlist hearts, top 5. */
+    most_wishlisted: { product_id: string; name: string; slug: string; wishlists: number }[];
+    /** Ranked by quantity in live carts, top 5. */
+    most_carted: { product_id: string; name: string; slug: string; cart_qty: number; carts: number }[];
+  };
+};
+
 // ---------------------------------------------------------------------------
 // payments — /api/v1/payments (JWT) + /api/v1/webhooks/stripe (public)
 // ---------------------------------------------------------------------------
@@ -536,3 +799,35 @@ export type ListReviewsParams = {
 
 export type CreateReviewInput = { rating: number; title?: string; body?: string };
 export type UpdateReviewInput = { rating?: number; title?: string; body?: string };
+
+/** Catalog context attached to one of the caller's own reviews. */
+export type MyReviewProduct = {
+  id: string;
+  name: string;
+  slug: string;
+  image_url?: string;
+};
+
+/** One row of GET /reviews/me: the review plus its product context. */
+export type MyReview = {
+  id: string;
+  user_id: string;
+  product_id: string;
+  rating: number;
+  title: string;
+  body: string;
+  created_at: string;
+  updated_at: string;
+  product: MyReviewProduct;
+};
+
+export type ListMyReviewsParams = {
+  sort?: ReviewSort;
+  /** 1-based page. Wins over `offset` when both are sent. */
+  page?: number;
+  limit?: number;
+  offset?: number;
+};
+
+/** `{ data: rows, meta: counters }` — same shape as other paged reads. */
+export type MyReviewsResponse = Paginated<MyReview>;

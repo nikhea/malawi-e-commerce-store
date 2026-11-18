@@ -67,23 +67,41 @@ func (r *Postgres) ConsumeVerification(ctx context.Context, userID, codeHash str
 }
 
 // CreateReset stores a reset token (one live row per user: resend
-// replaces). Returns nothing sensitive.
+// replaces). Delete + insert share one transaction so a failed insert
+// cannot leave the user without a token.
 func (r *Postgres) CreateReset(ctx context.Context, userID, tokenHash string, expiresAt time.Time) error {
-	// Delete-then-insert (not upsert): the UNIQUE is on token_hash, and
-	// we want exactly one live row per user.
-	if _, err := r.pool.Exec(ctx, `DELETE FROM password_resets WHERE user_id = $1`, userID); err != nil {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
 		return apperr.Internal(err)
 	}
-	_, err := r.pool.Exec(ctx, `INSERT INTO password_resets (user_id, token_hash, expires_at)
-	                            VALUES ($1, $2, $3)`, userID, tokenHash, expiresAt)
-	return err
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `DELETE FROM password_resets WHERE user_id = $1`, userID); err != nil {
+		return apperr.Internal(err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO password_resets (user_id, token_hash, expires_at)
+	                            VALUES ($1, $2, $3)`, userID, tokenHash, expiresAt); err != nil {
+		return apperr.Internal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return apperr.Internal(err)
+	}
+	return nil
 }
 
-// ConsumeReset validates and single-uses a reset token.
+// ConsumeReset validates and single-uses a reset token. The row lock makes
+// two concurrent resets with the same token serialize: the loser sees
+// used_at set and gets a conflict instead of resetting the password again.
 func (r *Postgres) ConsumeReset(ctx context.Context, tokenHash string) (model.PasswordReset, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return model.PasswordReset{}, apperr.Internal(err)
+	}
+	defer tx.Rollback(ctx)
+
 	var pr model.PasswordReset
-	err := r.pool.QueryRow(ctx, `SELECT id, user_id, token_hash, expires_at, used_at
-	                             FROM password_resets WHERE token_hash = $1`, tokenHash).
+	err = tx.QueryRow(ctx, `SELECT id, user_id, token_hash, expires_at, used_at
+	                        FROM password_resets WHERE token_hash = $1 FOR UPDATE`, tokenHash).
 		Scan(&pr.ID, &pr.UserID, &pr.TokenHash, &pr.ExpiresAt, &pr.UsedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return model.PasswordReset{}, apperr.NotFound("reset token not found")
@@ -97,7 +115,10 @@ func (r *Postgres) ConsumeReset(ctx context.Context, tokenHash string) (model.Pa
 	if time.Now().After(pr.ExpiresAt) {
 		return model.PasswordReset{}, apperr.Validation("token expired")
 	}
-	if _, err := r.pool.Exec(ctx, `UPDATE password_resets SET used_at = now() WHERE id = $1`, pr.ID); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE password_resets SET used_at = now() WHERE id = $1`, pr.ID); err != nil {
+		return model.PasswordReset{}, apperr.Internal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return model.PasswordReset{}, apperr.Internal(err)
 	}
 	return pr, nil
@@ -130,16 +151,18 @@ func (r *Postgres) GetRefresh(ctx context.Context, tokenHash string) (model.Refr
 	return rt, nil
 }
 
-// RotateRefresh revokes the old token and links the replacement. Returns
-// the old row (for user scoping) — the caller inserts the new token.
+// RotateRefresh revokes the old token and links the replacement. The
+// revoked_at guard makes rotation a compare-and-swap: a concurrent refresh
+// that lost the race gets CONFLICT instead of minting a second live chain.
 func (r *Postgres) RotateRefresh(ctx context.Context, oldID, newID string) error {
-	const q = `UPDATE refresh_tokens SET revoked_at = now(), replaced_by = $2 WHERE id = $1`
+	const q = `UPDATE refresh_tokens SET revoked_at = now(), replaced_by = $2
+	           WHERE id = $1 AND revoked_at IS NULL`
 	tag, err := r.pool.Exec(ctx, q, oldID, newID)
 	if err != nil {
 		return apperr.Internal(err)
 	}
 	if tag.RowsAffected() == 0 {
-		return apperr.NotFound("refresh token not found")
+		return apperr.Conflict("refresh token already rotated")
 	}
 	return nil
 }

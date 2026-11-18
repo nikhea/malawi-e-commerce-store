@@ -2,18 +2,15 @@ import type { Requester } from "../http";
 import type { ListUsersParams, Role, SetRoleInput, User, UserListResponse } from "../types";
 
 /**
- * /api/v1/users — JWT required. `get` is readable by any authenticated user;
- * admin endpoints are gated server-side by the admin role.
+ * /api/v1/users — JWT required. Owners read themselves through `me`;
+ * `adminGet` is gated server-side by the admin role. There is no public
+ * `get(id)` (it leaked other accounts' email/role).
  */
 export class UsersApi {
   constructor(private readonly request: Requester) {}
 
   me(): Promise<User> {
     return this.request("GET", "/users/me");
-  }
-
-  get(id: string): Promise<User> {
-    return this.request("GET", `/users/${enc(id)}`);
   }
 
   adminGet(id: string): Promise<User> {

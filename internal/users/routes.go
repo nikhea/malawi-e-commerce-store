@@ -17,7 +17,8 @@ func RegisterRoutes(g *gin.RouterGroup, svc public.Service) {
 
 	users := g.Group("/users")
 	users.GET("/me", h.Me)
-	users.GET("/:id", h.GetByID)
+	// No GET /users/{id}: any authenticated caller could read anyone's
+	// email/role. Owners use /users/me; admins use /admin/users/{id}.
 
 	admin := g.Group("/admin", middleware.RequireRole(string(public.RoleAdmin)))
 	admin.GET("/users", h.List)

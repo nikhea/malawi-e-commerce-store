@@ -27,3 +27,12 @@ type ListFilter struct {
 	Limit  int
 	Offset int
 }
+
+// MyReviewRow is a review joined to its product columns for the caller's
+// own review history. The service maps it into the public shape.
+type MyReviewRow struct {
+	Review
+	ProductName     string
+	ProductSlug     string
+	ProductImageURL string
+}

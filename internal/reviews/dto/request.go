@@ -24,3 +24,11 @@ type ListReviewsQuery struct {
 	Limit  int    `form:"limit"`
 	Offset int    `form:"offset"`
 }
+
+// ListMyReviewsQuery binds GET /reviews/me paging and sort.
+type ListMyReviewsQuery struct {
+	Sort   string `form:"sort"`
+	Page   int    `form:"page"`
+	Limit  int    `form:"limit"`
+	Offset int    `form:"offset"`
+}

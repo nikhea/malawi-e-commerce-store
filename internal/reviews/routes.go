@@ -21,6 +21,8 @@ func RegisterRoutes(open, protected *gin.RouterGroup, svc public.Service) {
 	ownNested.POST("", h.Create)
 
 	own := protected.Group("/reviews")
+	// Static "me" segment is registered before the id routes.
+	own.GET("/me", h.ListMine)
 	own.PATCH("/:id", h.UpdateMine)
 	own.DELETE("/:id", h.DeleteMine)
 

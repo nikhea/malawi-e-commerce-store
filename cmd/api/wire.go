@@ -24,6 +24,8 @@ import (
 	cartpublic "github.com/nikhea/malawi-e-commerce-store/internal/cart/public"
 	categories "github.com/nikhea/malawi-e-commerce-store/internal/categories"
 	categoriespublic "github.com/nikhea/malawi-e-commerce-store/internal/categories/public"
+	dashboard "github.com/nikhea/malawi-e-commerce-store/internal/dashboard"
+	dashboardpublic "github.com/nikhea/malawi-e-commerce-store/internal/dashboard/public"
 	inventory "github.com/nikhea/malawi-e-commerce-store/internal/inventory"
 	inventorypublic "github.com/nikhea/malawi-e-commerce-store/internal/inventory/public"
 	jobs "github.com/nikhea/malawi-e-commerce-store/internal/jobs"
@@ -46,6 +48,8 @@ import (
 	variantspublic "github.com/nikhea/malawi-e-commerce-store/internal/variants/public"
 	wishlist "github.com/nikhea/malawi-e-commerce-store/internal/wishlist"
 	wishlistpublic "github.com/nikhea/malawi-e-commerce-store/internal/wishlist/public"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/bulk"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/idempotency"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/mail"
 	pkgmedia "github.com/nikhea/malawi-e-commerce-store/pkg/media"
 	"github.com/nikhea/malawi-e-commerce-store/pkg/middleware"
@@ -62,6 +66,7 @@ import (
 type app struct {
 	usersSvc      userspublic.Service
 	categoriesSvc categoriespublic.Service
+	dashboardSvc  dashboardpublic.Service
 	variantsSvc   variantspublic.Service
 	productsSvc   productspublic.Service
 	cartSvc       cartpublic.Service
@@ -73,7 +78,8 @@ type app struct {
 	authSvc       authpublic.Service
 	mediaSvc      *mediaservice.Service
 	riverClient   *river.Client[pgx.Tx]
-	redisClient   *redis.Client // nil when Redis is down: limiters detach
+	redisClient   *redis.Client      // nil when Redis is down: limiters detach
+	idemStore     *idempotency.Store // nil when Redis is down: bulk writes just run
 }
 
 // wireApp assembles modules and infra in dependency order:
@@ -82,8 +88,14 @@ type app struct {
 // Modules build via their index.go Wire entry points; only app-level
 // infra (uploader, River, admin set) is constructed here.
 func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, error) {
+	// Bulk caps are one process-wide policy: endpoints that need a lower
+	// cap pass it explicitly to pkg/bulk.CheckCount.
+	bulk.SetMaxItems(cfg.MaxBulkItems)
+
 	usersSvc := users.Wire(pool)
 	categoriesSvc := categories.Wire(pool)
+	// Read-only reporting projection: no sibling services, no cycle.
+	dashboardSvc := dashboard.Wire(pool)
 	inventorySvc := inventory.Wire(pool)
 	variantsSvc := variants.Wire(pool, inventorySvc)
 	productsSvc := products.Wire(pool, categoriesSvc, variantsSvc)
@@ -96,6 +108,9 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 		log.Printf("WARNING: redis unavailable, rate limiting disabled: %v", err)
 		redisClient = nil
 	}
+	// Idempotency shares the same Redis. A nil store is safe: bulk writes
+	// simply run without replay protection, exactly like rate limiting.
+	idemStore := idempotency.New(redisClient)
 
 	// Notification fan-out (durable River jobs, not the old in-process
 	// bus): domain code calls narrow notifier methods; the adapter below
@@ -141,7 +156,7 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 	// Mail worker registered (not just the worker binary): River REQUIRES
 	// the kind in the inserting client's bundle, so the API must know it
 	// too. Either process may deliver; River still runs each job once.
-	sender := mail.NewSMTPSender("smtp.gmail.com", 587, cfg.EmailAddress, cfg.EmailPassword, cfg.EmailAddress)
+	sender := mail.NewSMTPSender(cfg.EmailHost, cfg.EmailPort, cfg.EmailAddress, cfg.EmailPassword, cfg.EmailAddress)
 	river.AddWorker(workers, jobs.NewSendMailWorker(sender))
 	// Completion callbacks: the worker calls these after a successful
 	// upload. New image owners add one RegisterComplete line here.
@@ -159,19 +174,25 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 		func(ctx context.Context, ownerID, url, publicID string) error {
 			return productsSvc.CompleteImage(ctx, ownerID, url, publicID)
 		})
-	if err := riverClient.Start(ctx); err != nil {
-		return nil, fmt.Errorf("river start: %w", err)
-	}
 
 	// notifySvc needs the River client (above); ordersSvc and the rest
 	// need notifySvc — so it slots in here, between infra and modules.
 	// AttachOrders closes the wiring cycle (notify→orders→notify):
 	// PaymentFailed mail needs order lookup, orders needs the notifier.
-	notifySvc := notify.New(riverClient, usersSvc, nil, cfg.AppURL)
+	notifySvc := notify.New(riverClient, usersSvc, nil, cfg.FrontendURL)
 	ordersSvc := orders.Wire(pool, cartSvc, inventorySvc, notifySvc)
 	// The expiry worker runs here too (same idempotent job): the sweep
 	// works with api alone, worker alone, or both — whoever is up.
 	river.AddWorker(workers, jobs.NewExpireReservationsWorker(inventorySvc, ordersSvc))
+
+	// EVERY worker must be registered before Start: the producer reads the
+	// worker map live when dispatching, so adding one after Start is an
+	// unsynchronized map write during traffic (fatal: concurrent map read
+	// and map write). cmd/worker/main.go already has the right order.
+	if err := riverClient.Start(ctx); err != nil {
+		return nil, fmt.Errorf("river start: %w", err)
+	}
+
 	paymentsSvc := payments.Wire(pool, ordersSvc,
 		paymentsgateway.NewStripeGateway(cfg.StripeSecretKey), notifySvc,
 		cfg.StripeWebhookSecret, cfg.FXMWKPerUSD, cfg.AppURL)
@@ -186,6 +207,7 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 	return &app{
 		usersSvc:      usersSvc,
 		categoriesSvc: categoriesSvc,
+		dashboardSvc:  dashboardSvc,
 		variantsSvc:   variantsSvc,
 		productsSvc:   productsSvc,
 		cartSvc:       cartSvc,
@@ -198,6 +220,7 @@ func wireApp(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) (*app, 
 		mediaSvc:      mediaSvc,
 		riverClient:   riverClient,
 		redisClient:   redisClient,
+		idemStore:     idemStore,
 	}, nil
 }
 
@@ -228,6 +251,9 @@ func newRouter(cfg config.Config) (*gin.Engine, error) {
 	// global: preflights must answer before auth, headers on every reply.
 	r.Use(cors.New(middleware.CORSConfig(cfg.AppURL, cfg.FrontendURL)))
 	r.Use(middleware.SecureHeaders())
+	// Bound every request body before any handler binds it. Multipart gets
+	// the larger allowance so product image batches keep working.
+	r.Use(middleware.BodyLimit(middleware.DefaultJSONBodyLimit, middleware.DefaultMultipartBodyLimit))
 	if err := r.SetTrustedProxies(nil); err != nil {
 		return nil, fmt.Errorf("trusted proxies: %w", err)
 	}
@@ -261,11 +287,12 @@ func registerRoutes(r *gin.Engine, a *app) {
 	protected.Use(middleware.JWT(a.authSvc))
 	users.RegisterRoutes(protected, a.usersSvc)
 	categories.RegisterRoutes(open, protected, a.categoriesSvc, a.mediaSvc)
-	variants.RegisterRoutes(open, protected, a.variantsSvc)
-	products.RegisterRoutes(open, protected, a.productsSvc, a.mediaSvc)
-	cart.RegisterRoutes(protected, a.cartSvc)
-	inventory.RegisterRoutes(protected, a.inventorySvc)
+	variants.RegisterRoutes(open, protected, a.variantsSvc, a.idemStore)
+	products.RegisterRoutes(open, protected, a.productsSvc, a.mediaSvc, a.idemStore)
+	cart.RegisterRoutes(protected, a.cartSvc, a.idemStore)
+	inventory.RegisterRoutes(protected, a.inventorySvc, a.idemStore)
 	orders.RegisterRoutes(protected, a.ordersSvc)
+	dashboard.RegisterRoutes(protected, a.dashboardSvc)
 	// Burst shield for Stripe retries: 120 webhook hits/min/IP. The HMAC
 	// stays the real authentication; this only absorbs floods.
 	webhooks := open.Group("/webhooks")
@@ -275,7 +302,7 @@ func registerRoutes(r *gin.Engine, a *app) {
 		}))
 	}
 	payments.RegisterRoutes(webhooks, protected, a.paymentsSvc)
-	wishlist.RegisterRoutes(protected, a.wishlistSvc)
+	wishlist.RegisterRoutes(protected, a.wishlistSvc, a.idemStore)
 	reviews.RegisterRoutes(open, protected, a.reviewsSvc)
 
 	// Generated API docs (docs/ is committed; refresh with

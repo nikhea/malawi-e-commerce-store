@@ -8,8 +8,8 @@
 #   production  hardened defaults (release mode, non-root, healthcheck)
 #
 # The API is the default entrypoint. Run the worker by overriding it:
-#   docker run ... <image> /app/worker            (with --no-healthcheck,
-#   since /health only exists on the API)
+#   docker run ... --entrypoint /app/worker --no-healthcheck <image>
+# (--no-healthcheck because /health only exists on the API).
 #
 # Migrations (db/migrations/*.sql, River tables via `river migrate-up`)
 # are applied OUTSIDE the image (CI migrate step or psql) — the image
@@ -58,11 +58,11 @@ FROM runtime AS staging
 ENV APP_ENV=staging
 ENTRYPOINT ["/app/api"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s \
-  CMD wget -qO- http://localhost:8080/health || exit 1
+  CMD wget -qO- "http://localhost:${APP_PORT:-8080}/health" || exit 1
 
 # ---- production: hardened defaults ----
 FROM runtime AS production
 ENV APP_ENV=production
 ENTRYPOINT ["/app/api"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s \
-  CMD wget -qO- http://localhost:8080/health || exit 1
+  CMD wget -qO- "http://localhost:${APP_PORT:-8080}/health" || exit 1

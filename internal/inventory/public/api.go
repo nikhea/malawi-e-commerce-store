@@ -5,6 +5,7 @@ package public
 
 import (
 	"context"
+	"github.com/nikhea/malawi-e-commerce-store/pkg/bulk"
 	"time"
 )
 
@@ -15,6 +16,14 @@ type Stock struct {
 	OnHand    int     `json:"on_hand" example:"50"`
 	Reserved  int     `json:"reserved" example:"3"`
 	Available int     `json:"available" example:"47"`
+}
+
+// BulkStockItem is one set-stock line. Stock is keyed by product plus
+// variant, so both ids travel together (the spec's "variantId" shorthand).
+type BulkStockItem struct {
+	ProductID string
+	VariantID *string
+	Qty       int
 }
 
 // ReserveLine is one SKU slice of a reservation.
@@ -28,6 +37,13 @@ type ReserveLine struct {
 type Service interface {
 	// SetStock upserts the on-hand quantity (admin restocking).
 	SetStock(ctx context.Context, productID string, variantID *string, qty int) (Stock, error)
+	// BulkSetStock sets on-hand stock for many SKUs. With atomic=true every
+	// line commits or the batch rolls back; otherwise failures are per item.
+	BulkSetStock(ctx context.Context, items []BulkStockItem, atomic bool) ([]bulk.BulkResult[Stock], error)
+	// GetStockByVariants reads availability for up to MAX_BULK_ITEMS
+	// variants. Unknown ids are returned in notFound; known variants with no
+	// inventory row read as zero stock.
+	GetStockByVariants(ctx context.Context, variantIDs []string) ([]Stock, []string, error)
 	// GetStock reads availability. Unknown SKU = zero stock, NOT an
 	// error (untracked items simply can't be reserved).
 	GetStock(ctx context.Context, productID string, variantID *string) (Stock, error)
@@ -37,11 +53,16 @@ type Service interface {
 	// Reserve holds qty for orderRef for ttl. Fails with CONFLICT when
 	// any line lacks availability. Atomic: all lines or none.
 	Reserve(ctx context.Context, orderRef string, lines []ReserveLine, ttl time.Duration) error
+	// ExtendReservation pushes every active hold for orderRef to now+ttl
+	// and returns the new deadline. CONFLICT when no hold is active.
+	ExtendReservation(ctx context.Context, orderRef string, ttl time.Duration) (time.Time, error)
 	// Release frees an order's active holds (cancel/expire path).
 	ReleaseByOrder(ctx context.Context, orderRef string) error
 	// ConfirmByOrder converts holds into sales (payment path).
 	ConfirmByOrder(ctx context.Context, orderRef string) error
-	// ReleaseExpired frees all holds past their TTL and returns the
-	// affected order refs (worker expiry sweep; orders cancels them).
-	ReleaseExpired(ctx context.Context) ([]string, error)
+	// ExpiredReservations lists order refs whose active hold is past its
+	// TTL. It does NOT settle them: the worker asks orders to settle each
+	// ref (cancel/release or confirm based on the order's real status), so
+	// a hold can never be freed while its order was paid.
+	ExpiredReservations(ctx context.Context) ([]string, error)
 }

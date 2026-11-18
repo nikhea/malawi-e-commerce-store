@@ -106,3 +106,74 @@ func (r *Postgres) GetByID(ctx context.Context, id string) (model.Variant, error
 	const q = `SELECT ` + variantColumns + ` FROM variants WHERE id = $1`
 	return scanVariant(r.pool.QueryRow(ctx, q, id))
 }
+
+// ProductExists checks the products table directly. Variants stays a leaf
+// module (no products import); the FK still enforces the same invariant on
+// write, this read only lets the bulk path reject the whole batch up front.
+func (r *Postgres) ProductExists(ctx context.Context, id string) (bool, error) {
+	const q = `SELECT EXISTS(SELECT 1 FROM products WHERE id = $1)`
+	var exists bool
+	if err := r.pool.QueryRow(ctx, q, id).Scan(&exists); err != nil {
+		return false, apperr.Internal(err)
+	}
+	return exists, nil
+}
+
+// CreateMany inserts the batch in one transaction. failIndex is -1 on
+// success; when >= 0 the batch rolled back and err is that item's failure.
+func (r *Postgres) CreateMany(ctx context.Context, items []model.Variant) ([]model.Variant, int, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, -1, apperr.Internal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	const q = `INSERT INTO variants (product_id, name, sku, price_cents)
+	           VALUES ($1, $2, $3, $4)
+	           RETURNING ` + variantColumns
+	out := make([]model.Variant, len(items))
+	for i, v := range items {
+		created, err := scanVariant(tx.QueryRow(ctx, q, v.ProductID, v.Name, v.SKU, v.PriceCents))
+		if err != nil {
+			switch pgCode(err) {
+			case "23505":
+				return nil, i, apperr.Conflict("sku already in use")
+			case "23503":
+				return nil, i, apperr.NotFound("product not found")
+			}
+			return nil, i, err
+		}
+		out[i] = created
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, -1, apperr.Internal(err)
+	}
+	return out, -1, nil
+}
+
+// UpdateMany writes the batch in one transaction. failIndex semantics match
+// CreateMany.
+func (r *Postgres) UpdateMany(ctx context.Context, items []model.Variant) ([]model.Variant, int, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, -1, apperr.Internal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	const q = `UPDATE variants
+	           SET name = $2, price_cents = $3, is_active = $4, updated_at = now()
+	           WHERE id = $1
+	           RETURNING ` + variantColumns
+	out := make([]model.Variant, len(items))
+	for i, v := range items {
+		updated, err := scanVariant(tx.QueryRow(ctx, q, v.ID, v.Name, v.PriceCents, v.IsActive))
+		if err != nil {
+			return nil, i, err
+		}
+		out[i] = updated
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, -1, apperr.Internal(err)
+	}
+	return out, -1, nil
+}

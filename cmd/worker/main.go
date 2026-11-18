@@ -87,7 +87,7 @@ func run(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error {
 
 	// SMTP sender for the send_mail queue. Misconfigured mail does NOT
 	// stop the worker (jobs still process); sends just log failures.
-	sender := mail.NewSMTPSender("smtp.gmail.com", 587, cfg.EmailAddress, cfg.EmailPassword, cfg.EmailAddress)
+	sender := mail.NewSMTPSender(cfg.EmailHost, cfg.EmailPort, cfg.EmailAddress, cfg.EmailPassword, cfg.EmailAddress)
 
 	uploader, err := pkgmedia.NewCloudinaryUploader(pkgmedia.CloudinaryConfig{
 		CloudName: cfg.CloudName,

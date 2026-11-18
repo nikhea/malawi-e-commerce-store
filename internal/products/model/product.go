@@ -5,6 +5,7 @@ import "time"
 // ListFilter is the repository-level catalog query. Values are already
 // normalized and validated by the service layer.
 type ListFilter struct {
+	IDs           []string
 	Query         string
 	CategoryID    *string
 	CategorySlug  *string
@@ -36,4 +37,14 @@ type Product struct {
 	IsActive      bool
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+}
+
+// Blockers counts the rows that keep a product alive. Only OrderItems
+// blocks a hard delete (order history has no FK); the rest are informational
+// so a dry run can explain what would cascade.
+type Blockers struct {
+	OrderItems    int
+	Variants      int
+	CartLines     int
+	WishlistItems int
 }

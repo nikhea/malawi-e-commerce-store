@@ -83,6 +83,37 @@ func (h *Handler) Create(c *gin.Context) {
 	response.Created(c, rev)
 }
 
+// ListMine godoc
+// @Summary List my reviews
+// @Description Caller's own reviews with product context, newest first by
+// @Description default. Sends {"data": [reviews], "meta": {page, limit, …}}.
+// @Tags reviews
+// @Produce json
+// @Param sort query string false "newest|oldest|highest|lowest"
+// @Param page query int false "1-based page (wins over offset)"
+// @Param limit query int false "Page size (default 12, max 100)"
+// @Param offset query int false "Page offset"
+// @Success 200 {object} public.MyReviewsResponse
+// @Failure 400 {object} response.ErrorResponse
+// @Failure 401 {object} response.ErrorResponse
+// @Security BearerAuth
+// @Router /reviews/me [get]
+func (h *Handler) ListMine(c *gin.Context) {
+	var q dto.ListMyReviewsQuery
+	if err := c.ShouldBindQuery(&q); err != nil {
+		response.Error(c, apperr.Validation("invalid query"))
+		return
+	}
+	page, err := h.svc.ListMine(c.Request.Context(), middleware.UserIDOf(c), public.ListFilter{
+		Sort: q.Sort, Page: q.Page, Limit: q.Limit, Offset: q.Offset,
+	})
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+	response.OKMeta(c, page.Items, page.Meta)
+}
+
 // UpdateMine godoc
 // @Summary Edit my review
 // @Tags reviews

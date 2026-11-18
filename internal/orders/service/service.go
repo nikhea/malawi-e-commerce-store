@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	cartpublic "github.com/nikhea/malawi-e-commerce-store/internal/cart/public"
 	inventorypublic "github.com/nikhea/malawi-e-commerce-store/internal/inventory/public"
 	"github.com/nikhea/malawi-e-commerce-store/internal/orders/model"
@@ -20,6 +21,7 @@ type Repository interface {
 	Create(ctx context.Context, o model.Order, items []model.Item) (model.Order, error)
 	GetByID(ctx context.Context, orderID string) (model.Order, error)
 	ListByUser(ctx context.Context, userID string, f model.ListFilter) ([]model.Order, int64, error)
+	Aggregate(ctx context.Context, userID string, f model.AggregateFilter) (model.Aggregates, error)
 	MarkPaid(ctx context.Context, orderID string) (model.Order, error)
 	Cancel(ctx context.Context, orderID string) (model.Order, error)
 	GetItems(ctx context.Context, orderID string) ([]model.Item, error)
@@ -50,7 +52,7 @@ type service struct {
 func NewService(repo Repository, cart cartpublic.Service, inventory inventorypublic.Service, notify Notifier, cfg Config) public.Service {
 	ttl := cfg.ReserveTTL
 	if ttl <= 0 {
-		ttl = 15 * time.Minute
+		ttl = public.ReserveTTL
 	}
 	return &service{repo: repo, cart: cart, inventory: inventory, notify: notify, ttl: ttl}
 }
@@ -226,6 +228,102 @@ func (s *service) ListMine(ctx context.Context, userID string, f public.ListFilt
 	return public.Page{Items: out, Meta: pagination.NewMeta(total, limit, offset)}, nil
 }
 
+// aggregateModel converts the repository's module-private totals into the
+// public wire shape. Slices are non-nil so an empty result serializes as []
+// rather than null.
+func aggregateModel(in model.Aggregates) public.Aggregates {
+	out := public.Aggregates{
+		Orders: public.OrdersAggregate{
+			Count:        in.Orders.Count,
+			FirstOrderAt: in.Orders.FirstOrderAt,
+			LastOrderAt:  in.Orders.LastOrderAt,
+			ByStatus:     make([]public.StatusTotal, 0, len(in.Orders.ByStatus)),
+			ByCurrency:   make([]public.CurrencyTotal, 0, len(in.Orders.ByCurrency)),
+		},
+		Items: public.ItemsAggregate{
+			Lines:             in.Items.Lines,
+			UnitsSold:         in.Items.UnitsSold,
+			RevenueByCurrency: make([]public.CurrencyRevenue, 0, len(in.Items.RevenueByCurrency)),
+			TopProducts:       make([]public.ProductTotal, 0, len(in.Items.TopProducts)),
+		},
+	}
+	for _, st := range in.Orders.ByStatus {
+		out.Orders.ByStatus = append(out.Orders.ByStatus, public.StatusTotal{
+			Status: st.Status, Currency: st.Currency, Orders: st.Orders,
+			TotalCents: st.TotalCents, AverageCents: st.AverageCents,
+		})
+	}
+	for _, ct := range in.Orders.ByCurrency {
+		out.Orders.ByCurrency = append(out.Orders.ByCurrency, public.CurrencyTotal{
+			Currency: ct.Currency, Orders: ct.Orders,
+			TotalCents: ct.TotalCents, AverageCents: ct.AverageCents,
+		})
+	}
+	for _, cr := range in.Items.RevenueByCurrency {
+		out.Items.RevenueByCurrency = append(out.Items.RevenueByCurrency, public.CurrencyRevenue{
+			Currency: cr.Currency, Lines: cr.Lines,
+			UnitsSold: cr.UnitsSold, RevenueCents: cr.RevenueCents,
+		})
+	}
+	for _, p := range in.Items.TopProducts {
+		out.Items.TopProducts = append(out.Items.TopProducts, public.ProductTotal{
+			ProductID: p.ProductID, Name: p.Name, SKU: p.SKU, Currency: p.Currency,
+			UnitsSold: p.UnitsSold, Orders: p.Orders, RevenueCents: p.RevenueCents,
+		})
+	}
+	return out
+}
+
+// aggregateFilter validates the shared query and normalizes it for the
+// repository. Status/currency casing is handled here, not in the handler.
+func aggregateFilter(f public.AggregateFilter) (model.AggregateFilter, error) {
+	status := strings.ToLower(strings.TrimSpace(f.Status))
+	switch status {
+	case "", public.StatusPending, public.StatusPaid, public.StatusCancelled:
+	default:
+		return model.AggregateFilter{}, apperr.Validation("status must be pending, paid or cancelled")
+	}
+	if f.CreatedAfter != nil && f.CreatedBefore != nil && f.CreatedAfter.After(*f.CreatedBefore) {
+		return model.AggregateFilter{}, apperr.Validation("created_after cannot be after created_before")
+	}
+	return model.AggregateFilter{
+		Status: status, Currency: strings.TrimSpace(f.Currency),
+		CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore,
+		TopProducts: public.TopProductsLimit,
+	}, nil
+}
+
+func (s *service) aggregate(ctx context.Context, userID string, f public.AggregateFilter) (public.Aggregates, error) {
+	mf, err := aggregateFilter(f)
+	if err != nil {
+		return public.Aggregates{}, err
+	}
+	in, err := s.repo.Aggregate(ctx, userID, mf)
+	if err != nil {
+		return public.Aggregates{}, err
+	}
+	return aggregateModel(in), nil
+}
+
+func (s *service) AggregateMine(ctx context.Context, userID string, f public.AggregateFilter) (public.Aggregates, error) {
+	if strings.TrimSpace(userID) == "" {
+		return public.Aggregates{}, apperr.Validation("user id is required")
+	}
+	return s.aggregate(ctx, userID, f)
+}
+
+func (s *service) AggregateAll(ctx context.Context, userID string, f public.AggregateFilter) (public.Aggregates, error) {
+	userID = strings.TrimSpace(userID)
+	if userID != "" {
+		// This value comes from a query string, not a token: reject garbage
+		// before handing it to a UUID column (which would surface as a 500).
+		if _, err := uuid.Parse(userID); err != nil {
+			return public.Aggregates{}, apperr.Validation("user_id must be a UUID")
+		}
+	}
+	return s.aggregate(ctx, userID, f)
+}
+
 func (s *service) Cancel(ctx context.Context, userID, orderID string) (public.Order, error) {
 	o, err := s.owned(ctx, userID, orderID)
 	if err != nil {
@@ -236,16 +334,26 @@ func (s *service) Cancel(ctx context.Context, userID, orderID string) (public.Or
 
 func (s *service) cancelOrder(ctx context.Context, o model.Order) (public.Order, error) {
 	if o.Status == public.StatusCancelled {
-		return s.view(ctx, o) // idempotent
+		// Idempotent, but still release: an earlier attempt may have won
+		// the transition and crashed before freeing the hold.
+		if err := s.inventory.ReleaseByOrder(ctx, o.ID); err != nil {
+			return public.Order{}, err
+		}
+		return s.view(ctx, o)
 	}
 	if o.Status != public.StatusPending {
 		return public.Order{}, apperr.Conflict("order is not pending")
 	}
-	if err := s.inventory.ReleaseByOrder(ctx, o.ID); err != nil {
-		return public.Order{}, err
-	}
+	// Claim the transition BEFORE releasing stock. If a concurrent MarkPaid
+	// already won pending → paid, Cancel fails and we must not free a hold
+	// for a paid order.
 	cancelled, err := s.repo.Cancel(ctx, o.ID)
 	if err != nil {
+		return public.Order{}, err
+	}
+	if err := s.inventory.ReleaseByOrder(ctx, o.ID); err != nil {
+		// The order is cancelled; a retry takes the idempotent branch above
+		// and releases the hold then.
 		return public.Order{}, err
 	}
 	view, err := s.view(ctx, cancelled)
@@ -269,7 +377,13 @@ func (s *service) MarkPaid(ctx context.Context, orderRef string) (public.Order, 
 	}
 	switch o.Status {
 	case public.StatusPaid:
-		return s.view(ctx, o) // idempotent repeat
+		// Idempotent repeat — but re-run the confirm: a previous attempt
+		// could have flipped the order and crashed before settling stock.
+		// ConfirmByOrder is a no-op when there are no active holds.
+		if err := s.inventory.ConfirmByOrder(ctx, o.ID); err != nil {
+			return public.Order{}, err
+		}
+		return s.view(ctx, o)
 	case public.StatusCancelled:
 		return public.Order{}, apperr.Conflict("order is cancelled")
 	case public.StatusPending:
@@ -293,6 +407,22 @@ func (s *service) MarkPaid(ctx context.Context, orderRef string) (public.Order, 
 	return view, nil
 }
 
+// ExtendCheckoutHold refreshes the hold for a pending order. Payments calls
+// it when a hosted session is created so the hold cannot expire mid-payment.
+func (s *service) ExtendCheckoutHold(ctx context.Context, orderID string) (time.Time, error) {
+	if strings.TrimSpace(orderID) == "" {
+		return time.Time{}, apperr.Validation("order id is required")
+	}
+	o, err := s.repo.GetByID(ctx, orderID)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if o.Status != public.StatusPending {
+		return time.Time{}, apperr.Conflict("order is not pending")
+	}
+	return s.inventory.ExtendReservation(ctx, o.ID, s.ttl)
+}
+
 func (s *service) CancelByRef(ctx context.Context, orderRef string) error {
 	if strings.TrimSpace(orderRef) == "" {
 		return apperr.Validation("order ref is required")
@@ -303,4 +433,33 @@ func (s *service) CancelByRef(ctx context.Context, orderRef string) error {
 	}
 	_, err = s.cancelOrder(ctx, o)
 	return err
+}
+
+// SettleExpired resolves one expired stock hold by the order's real status:
+// a pending order is cancelled (transition first, then release), a paid
+// order confirms the hold (the payment won the race with the sweep), and an
+// already cancelled order just releases. Safe to repeat, so a sweep that
+// fails halfway converges on the next run.
+func (s *service) SettleExpired(ctx context.Context, orderRef string) error {
+	if strings.TrimSpace(orderRef) == "" {
+		return apperr.Validation("order ref is required")
+	}
+	o, err := s.repo.GetByID(ctx, orderRef)
+	if err != nil {
+		if apperr.CodeOf(err) == apperr.CodeNotFound {
+			return nil // order deleted: nothing left to settle
+		}
+		return err
+	}
+	switch o.Status {
+	case public.StatusPending:
+		_, err = s.cancelOrder(ctx, o)
+		return err
+	case public.StatusPaid:
+		return s.inventory.ConfirmByOrder(ctx, o.ID)
+	case public.StatusCancelled:
+		return s.inventory.ReleaseByOrder(ctx, o.ID)
+	default:
+		return nil
+	}
 }

@@ -31,17 +31,26 @@ func pgCode(err error) string {
 	return ""
 }
 
-func (r *Postgres) UpsertStock(ctx context.Context, productID string, variantID *string, qty int) (model.Stock, error) {
-	const q = `INSERT INTO inventory (product_id, variant_id, on_hand_qty)
-	           VALUES ($1, $2, $3)
-	           ON CONFLICT (product_id, COALESCE(variant_id, '00000000-0000-0000-0000-000000000000'))
-	           DO UPDATE SET on_hand_qty = EXCLUDED.on_hand_qty, updated_at = now()
-	           RETURNING id, product_id, variant_id, on_hand_qty, reserved_qty, created_at, updated_at`
+// rowQuerier is satisfied by both *pgxpool.Pool and pgx.Tx, so the upsert
+// body is shared by the single-line and transactional bulk paths.
+type rowQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func upsertStock(ctx context.Context, q rowQuerier, productID string, variantID *string, qty int) (model.Stock, error) {
+	const sql = `INSERT INTO inventory (product_id, variant_id, on_hand_qty)
+	             VALUES ($1, $2, $3)
+	             ON CONFLICT (product_id, COALESCE(variant_id, '00000000-0000-0000-0000-000000000000'))
+	             DO UPDATE SET on_hand_qty = EXCLUDED.on_hand_qty, updated_at = now()
+	             RETURNING id, product_id, variant_id, on_hand_qty, reserved_qty, created_at, updated_at`
 	var s model.Stock
-	err := r.pool.QueryRow(ctx, q, productID, variantID, qty).Scan(
+	err := q.QueryRow(ctx, sql, productID, variantID, qty).Scan(
 		&s.ID, &s.ProductID, &s.VariantID, &s.OnHand, &s.Reserved, &s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		if pgCode(err) == "23503" {
+			if variantID != nil {
+				return model.Stock{}, apperr.NotFound("variant not found")
+			}
 			return model.Stock{}, apperr.NotFound("product not found")
 		}
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -50,6 +59,77 @@ func (r *Postgres) UpsertStock(ctx context.Context, productID string, variantID 
 		return model.Stock{}, apperr.Internal(err)
 	}
 	return s, nil
+}
+
+func (r *Postgres) UpsertStock(ctx context.Context, productID string, variantID *string, qty int) (model.Stock, error) {
+	return upsertStock(ctx, r.pool, productID, variantID, qty)
+}
+
+// BulkUpsertStock writes many stock rows. Non-atomic writes run one by one
+// and report per-item errors; atomic writes share one transaction and roll
+// back everything on the first failure. The returned error slice is
+// index-aligned with items.
+func (r *Postgres) BulkUpsertStock(ctx context.Context, items []model.StockInput, atomic bool) ([]model.Stock, []error, error) {
+	errs := make([]error, len(items))
+	if !atomic {
+		out := make([]model.Stock, len(items))
+		for i, item := range items {
+			out[i], errs[i] = r.UpsertStock(ctx, item.ProductID, item.VariantID, item.Qty)
+		}
+		return out, errs, nil
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, nil, apperr.Internal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	out := make([]model.Stock, len(items))
+	for i, item := range items {
+		stock, err := upsertStock(ctx, tx, item.ProductID, item.VariantID, item.Qty)
+		if err != nil {
+			errs[i] = err
+			return nil, errs, nil // deferred rollback undoes earlier lines
+		}
+		out[i] = stock
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, nil, apperr.Internal(err)
+	}
+	return out, errs, nil
+}
+
+// ListStockByVariantIDs returns availability for known variants. A known
+// variant with no inventory row reads as zero stock; unknown ids are simply
+// absent from the result (the service turns that into notFound).
+func (r *Postgres) ListStockByVariantIDs(ctx context.Context, variantIDs []string) ([]model.Stock, error) {
+	if len(variantIDs) == 0 {
+		return []model.Stock{}, nil
+	}
+	const q = `SELECT v.product_id, v.id, COALESCE(i.on_hand_qty, 0), COALESCE(i.reserved_qty, 0)
+	           FROM variants v
+	           LEFT JOIN inventory i ON i.product_id = v.product_id AND i.variant_id = v.id
+	           WHERE v.id = ANY($1)`
+	rows, err := r.pool.Query(ctx, q, variantIDs)
+	if err != nil {
+		return nil, apperr.Internal(err)
+	}
+	defer rows.Close()
+	out := []model.Stock{}
+	for rows.Next() {
+		var s model.Stock
+		var variantID string
+		if err := rows.Scan(&s.ProductID, &variantID, &s.OnHand, &s.Reserved); err != nil {
+			return nil, apperr.Internal(err)
+		}
+		s.VariantID = &variantID
+		out = append(out, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, apperr.Internal(err)
+	}
+	return out, nil
 }
 
 func (r *Postgres) GetStock(ctx context.Context, productID string, variantID *string) (model.Stock, error) {
@@ -138,6 +218,42 @@ func (r *Postgres) Reserve(ctx context.Context, orderRef string, lines []model.R
 	return nil
 }
 
+// ExtendReservation slides every active hold for orderRef to now+ttl.
+// Payments calls it when a session or intent is created: the hold must not
+// expire while the customer can still pay. No active hold = CONFLICT (the
+// order was already settled or swept).
+func (r *Postgres) ExtendReservation(ctx context.Context, orderRef string, ttl time.Duration) (time.Time, error) {
+	const q = `UPDATE reservations
+	           SET expires_at = now() + make_interval(secs => $2)
+	           WHERE order_ref = $1 AND status = 'active'
+	           RETURNING expires_at`
+	rows, err := r.pool.Query(ctx, q, orderRef, ttl.Seconds())
+	if err != nil {
+		return time.Time{}, apperr.Internal(err)
+	}
+	defer rows.Close()
+
+	var deadline time.Time
+	extended := 0
+	for rows.Next() {
+		var exp time.Time
+		if err := rows.Scan(&exp); err != nil {
+			return time.Time{}, apperr.Internal(err)
+		}
+		if exp.After(deadline) {
+			deadline = exp
+		}
+		extended++
+	}
+	if err := rows.Err(); err != nil {
+		return time.Time{}, apperr.Internal(err)
+	}
+	if extended == 0 {
+		return time.Time{}, apperr.Conflict("no active reservation")
+	}
+	return deadline, nil
+}
+
 // settle moves an order's ACTIVE holds to a terminal status, adjusting
 // counters accordingly. confirm=true sells (on_hand down), false releases.
 // Idempotent: no active holds is a success (webhook retries demand it).
@@ -206,33 +322,28 @@ func (r *Postgres) ConfirmByOrder(ctx context.Context, orderRef string) error {
 	return r.settle(ctx, orderRef, true)
 }
 
-// ReleaseExpired frees every hold past its TTL (abandoned checkouts)
-// and returns the affected order refs for order cancellation. Each ref
-// settles in its own transaction — one poisoned ref can't block the rest.
-func (r *Postgres) ReleaseExpired(ctx context.Context) ([]string, error) {
+// ExpiredReservations lists refs with an active hold past its TTL. It does
+// not settle them: the worker asks orders to settle each ref, so the order's
+// actual status (pending/paid/cancelled) decides release vs confirm.
+func (r *Postgres) ExpiredReservations(ctx context.Context) ([]string, error) {
 	const q = `SELECT DISTINCT order_ref FROM reservations
 	           WHERE status = 'active' AND expires_at < now()`
 	rows, err := r.pool.Query(ctx, q)
 	if err != nil {
 		return nil, apperr.Internal(err)
 	}
+	defer rows.Close()
+
 	refs := []string{}
 	for rows.Next() {
 		var ref string
 		if err := rows.Scan(&ref); err != nil {
-			rows.Close()
 			return nil, apperr.Internal(err)
 		}
 		refs = append(refs, ref)
 	}
-	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, apperr.Internal(err)
-	}
-	for _, ref := range refs {
-		if err := r.settle(ctx, ref, false); err != nil {
-			return refs, err
-		}
 	}
 	return refs, nil
 }
